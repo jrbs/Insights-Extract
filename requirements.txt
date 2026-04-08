@@ -1,0 +1,14 @@
+# insights-extract — runtime dependencies
+# Python 3.10+ required
+
+# YouTube audio download
+yt-dlp>=2024.3.10
+
+# Local speech-to-text
+openai-whisper>=20231117
+
+# Output schema validation
+pydantic>=2.5.0
+
+# HTTP client for Ollama API
+requests>=2.31.0

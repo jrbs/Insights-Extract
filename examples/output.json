@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0.0",
+  "source": {
+    "type": "youtube",
+    "url_or_path": "https://www.youtube.com/watch?v=example",
+    "title": "Hexagonal Architecture in 8 minutes",
+    "duration_seconds": 480
+  },
+  "decision": {
+    "watch_full": true,
+    "confidence": "high",
+    "rationale": "Vídeo curto, denso, com exemplos de código reais. Vale assistir se você quer entender ports & adapters sem teoria abstrata."
+  },
+  "key_concepts": [
+    {
+      "name": "Ports and Adapters",
+      "explanation": "Separação entre lógica de negócio (core) e detalhes de infraestrutura via interfaces (ports) implementadas por adaptadores externos.",
+      "timestamp_seconds": 45
+    },
+    {
+      "name": "Dependency Inversion",
+      "explanation": "Inversão de controle: core não depende de infraestrutura. Infraestrutura (adapters) depende de core (ports).",
+      "timestamp_seconds": 120
+    },
+    {
+      "name": "Testability by Design",
+      "explanation": "Arquitetura hexagonal permite testes isolados do core sem inicializar frameworks externos, reduzindo tempo de teste.",
+      "timestamp_seconds": 240
+    }
+  ],
+  "architectural_risks": [
+    "Risco de over-engineering quando aplicado a CRUDs simples sem lógica complexa",
+    "Curva de aprendizado alta para times sem experiência prévia em DDD e padrões de arquitetura"
+  ],
+  "open_questions": [
+    "Como aplicar isso em projetos legados sem big bang refactor?",
+    "Qual a granularidade ideal de adapters em microserviços?",
+    "Como integrar com frameworks que exigem dependência direta do core?"
+  ],
+  "actionable_items": [
+    "Identificar 1 service do seu projeto atual e mapear quais são os ports",
+    "Escrever um adapter de teste em memória para um repository existente",
+    "Refatorar 1 função crítica usando ports para separar lógica de I/O"
+  ],
+  "metadata": {
+    "extracted_at": "2026-04-08T14:23:00Z",
+    "transcription_model": "whisper-base",
+    "llm_model": "qwen2.5:7b",
+    "transcription_duration_seconds": 23.4,
+    "llm_duration_seconds": 18.7,
+    "language_detected": "en"
+  }
+}
