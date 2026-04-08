@@ -3,13 +3,22 @@
 Orquestra: download → transcrição → prompt → LLM → validação → JSON.
 
 Uso:
+    # Local (Ollama, default)
     python -m src.extract https://www.youtube.com/watch?v=XXXXX
     python -m src.extract /path/to/video.mp4 --output insights.json
     python -m src.extract video.mp4 --model llama3.1:8b
+
+    # Cloud providers (API key from env var or --api-key)
+    python -m src.extract <url> --provider openrouter --model anthropic/claude-3.5-sonnet
+    python -m src.extract <url> --provider huggingface --model meta-llama/Llama-3.1-70B-Instruct
+
+Environment variables read (if --api-key not provided):
+    OPENROUTER_API_KEY, HUGGINGFACE_API_KEY
 """
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -17,10 +26,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import NoReturn
 
-import requests
-
-from .llm import OllamaConnectionError, OllamaValidationError, call_ollama
-from .schema import Insight, SourceInfo, Decision, KeyConcept, Metadata
+from .llm import (
+    LLMConnectionError,
+    LLMValidationError,
+    PROVIDERS,
+    call_llm,
+)
+from .schema import Insight
 from .transcribe import transcribe
 
 
@@ -283,14 +295,18 @@ Return ONLY the JSON object. No markdown, no code blocks, no explanation."""
 def extract(
     input_path: str,
     output_file: str | None = None,
-    model: str = "qwen2.5:7b",
+    model: str | None = None,
+    provider: str = "ollama",
+    api_key: str | None = None,
 ) -> int:
     """Main extraction pipeline.
 
     Args:
         input_path: YouTube URL or file path
         output_file: Output JSON file path (default: stdout)
-        model: Ollama model name
+        model: LLM model name (provider-specific). If None, uses provider default.
+        provider: 'ollama' (local), 'openrouter', or 'huggingface'
+        api_key: API key for cloud providers (required if not ollama)
 
     Returns:
         Exit code
@@ -334,20 +350,28 @@ def extract(
     # 3. Build prompt (sandwich technique)
     prompt = build_prompt(transcript)
 
-    # 4. Call LLM
-    print(f"[extract] extracting insights with {model}...")
+    # 4. Call LLM (dispatches to ollama/openrouter/huggingface)
+    effective_model = model or PROVIDERS[provider]["default_model"]
+    print(f"[extract] extracting insights via {provider} ({effective_model})...")
     llm_start = time.time()
     try:
-        insight = call_ollama(prompt, Insight, model=model)
-    except OllamaConnectionError as e:
+        insight = call_llm(
+            prompt=prompt,
+            schema=Insight,
+            provider=provider,
+            model=effective_model,
+            api_key=api_key,
+        )
+    except LLMConnectionError as e:
         error_exit(str(e), EXIT_OLLAMA_NOT_RUNNING)
-    except OllamaValidationError as e:
+    except LLMValidationError as e:
         error_exit(str(e), EXIT_LLM_VALIDATION_ERROR)
     llm_duration = time.time() - llm_start
 
     # 5. Update metadata with real values
     insight.metadata.transcription_duration_seconds = transcribe_duration
     insight.metadata.llm_duration_seconds = llm_duration
+    insight.metadata.llm_model = f"{provider}:{effective_model}"
     insight.metadata.extracted_at = datetime.utcnow()
 
     # 6. Output
@@ -368,7 +392,21 @@ def extract(
 def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Extract structured insights from YouTube videos or local files"
+        description="Extract structured insights from YouTube videos or local files",
+        epilog=(
+            "Examples:\n"
+            "  # Local (Ollama, default)\n"
+            "  python -m src.extract https://www.youtube.com/watch?v=XXXXX\n"
+            "\n"
+            "  # OpenRouter (key from OPENROUTER_API_KEY env var or --api-key)\n"
+            "  python -m src.extract <url> --provider openrouter \\\n"
+            "      --model anthropic/claude-3.5-sonnet\n"
+            "\n"
+            "  # HuggingFace (key from HUGGINGFACE_API_KEY env var or --api-key)\n"
+            "  python -m src.extract <url> --provider huggingface \\\n"
+            "      --model meta-llama/Llama-3.1-70B-Instruct"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "input", help="YouTube URL (https://www.youtube.com/watch?v=...) or file path"
@@ -380,16 +418,56 @@ def main() -> None:
         default=None,
     )
     parser.add_argument(
+        "--provider",
+        "-p",
+        help="LLM provider: 'ollama' (local), 'openrouter', or 'huggingface' (default: ollama)",
+        choices=list(PROVIDERS.keys()),
+        default="ollama",
+    )
+    parser.add_argument(
         "--model",
         "-m",
-        help="Ollama model name (default: qwen2.5:7b)",
-        default="qwen2.5:7b",
+        help="Model name (provider-specific). If omitted, uses the provider's default.",
+        default=None,
+    )
+    parser.add_argument(
+        "--api-key",
+        "-k",
+        help=(
+            "API key for cloud providers. If omitted, reads from env var: "
+            "OPENROUTER_API_KEY or HUGGINGFACE_API_KEY."
+        ),
+        default=None,
     )
 
     args = parser.parse_args()
 
+    # Resolve API key from env var when using a cloud provider
+    api_key = args.api_key
+    if api_key is None and args.provider != "ollama":
+        env_var = {
+            "openrouter": "OPENROUTER_API_KEY",
+            "huggingface": "HUGGINGFACE_API_KEY",
+        }.get(args.provider)
+        if env_var:
+            api_key = os.environ.get(env_var)
+
+    if args.provider != "ollama" and not api_key:
+        print(
+            f"[extract] error: provider '{args.provider}' requires an API key. "
+            f"Pass --api-key or set the env var.",
+            file=sys.stderr,
+        )
+        sys.exit(EXIT_INVALID_INPUT)
+
     try:
-        exit_code = extract(args.input, args.output, args.model)
+        exit_code = extract(
+            input_path=args.input,
+            output_file=args.output,
+            model=args.model,
+            provider=args.provider,
+            api_key=api_key,
+        )
         sys.exit(exit_code)
     except KeyboardInterrupt:
         print("\n[extract] interrupted by user", file=sys.stderr)

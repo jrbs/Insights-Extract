@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Insights Extract — Turn YouTube videos into structured insights</title>
+  <meta name="description" content="Local-first tool that transcribes YouTube videos with Whisper and extracts structured insights using a local LLM. No API keys. No cloud.">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <link rel="stylesheet" type="text/css" href="https://unpkg.com/@phosphor-icons/web@2.0.3/src/regular/style.css" />
+  <link rel="stylesheet" type="text/css" href="https://unpkg.com/@phosphor-icons/web@2.0.3/src/fill/style.css" />
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0c0a09;
+      color: #d6d3d1;
+    }
+    .mono { font-family: 'SF Mono', Monaco, Consolas, monospace; }
+    .glass {
+      background: rgba(28, 25, 23, 0.6);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(168, 162, 158, 0.1);
+    }
+    .gradient-border {
+      position: relative;
+    }
+    .gradient-border::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      padding: 1px;
+      background: linear-gradient(135deg, rgba(232, 121, 249, 0.4), rgba(168, 85, 247, 0.1));
+      border-radius: inherit;
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      pointer-events: none;
+    }
+    @keyframes pulse-slow {
+      0%, 100% { opacity: 0.3; }
+      50% { opacity: 0.6; }
+    }
+    .animate-pulse-slow { animation: pulse-slow 2s ease-in-out infinite; }
+    .slide-in {
+      animation: slideIn 0.4s ease-out;
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #e879f9, #a855f7);
+      transition: all 0.2s;
+    }
+    .btn-primary:hover:not(:disabled) {
+      filter: brightness(1.1);
+      transform: translateY(-1px);
+    }
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .tab-active {
+      background: rgba(232, 121, 249, 0.15);
+      color: #f0abfc;
+      border-color: rgba(232, 121, 249, 0.4);
+    }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #1c1917; }
+    ::-webkit-scrollbar-thumb { background: #44403c; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #57534e; }
+  </style>
+</head>
+<body x-data="app()" x-init="init()">
+
+  <!-- Header -->
+  <header class="border-b border-stone-800/50 bg-stone-950/80 backdrop-blur sticky top-0 z-10">
+    <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-fuchsia-500 to-purple-600 flex items-center justify-center">
+          <i class="ph-fill ph-lightning text-white text-xl"></i>
+        </div>
+        <div>
+          <h1 class="text-stone-100 font-semibold tracking-tight">Insights Extract</h1>
+          <p class="text-stone-500 text-xs">Local-first • Zero API keys • Schema-contracted</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2 text-xs">
+          <div class="w-2 h-2 rounded-full" :class="backendOnline ? 'bg-emerald-400 animate-pulse-slow' : 'bg-red-500'"></div>
+          <span class="text-stone-400" x-text="backendOnline ? 'backend online' : 'backend offline'"></span>
+        </div>
+        <button @click="showSettings = !showSettings"
+          class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-stone-800 hover:border-fuchsia-500/50 text-stone-400 hover:text-stone-100 transition-colors text-xs">
+          <i class="ph ph-gear"></i>
+          <span x-text="providerLabel(provider)"></span>
+        </button>
+        <a href="https://github.com/jrbs/Insights-Extract" target="_blank" class="text-stone-400 hover:text-stone-100 transition-colors">
+          <i class="ph ph-github-logo text-xl"></i>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Settings Drawer (overlay) -->
+  <div x-show="showSettings" x-transition.opacity class="fixed inset-0 bg-black/60 backdrop-blur-sm z-20" @click="showSettings = false"></div>
+
+  <aside x-show="showSettings" x-transition:enter="transition ease-out duration-300"
+    x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0"
+    x-transition:leave="transition ease-in duration-200"
+    x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full"
+    class="fixed top-0 right-0 h-full w-full max-w-md bg-stone-950 border-l border-stone-800 z-30 overflow-y-auto">
+    <div class="p-6">
+      <div class="flex items-center justify-between mb-6">
+        <div class="flex items-center gap-2">
+          <i class="ph-fill ph-gear text-fuchsia-400 text-xl"></i>
+          <h2 class="text-stone-100 font-semibold text-lg">Settings</h2>
+        </div>
+        <button @click="showSettings = false" class="text-stone-500 hover:text-stone-200">
+          <i class="ph ph-x text-xl"></i>
+        </button>
+      </div>
+
+      <!-- Provider selector -->
+      <div class="mb-6">
+        <label class="text-stone-400 text-xs font-semibold uppercase tracking-wider mb-3 block">LLM provider</label>
+        <div class="space-y-2">
+          <template x-for="p in providerList" :key="p.id">
+            <button
+              @click="provider = p.id; saveSettings()"
+              class="w-full flex items-start gap-3 p-3 rounded-lg border text-left transition-colors"
+              :class="provider === p.id ? 'border-fuchsia-500/50 bg-fuchsia-500/5' : 'border-stone-800 hover:border-stone-700'">
+              <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+                :class="provider === p.id ? 'bg-fuchsia-500/20' : 'bg-stone-900'">
+                <i :class="p.icon + ' text-lg'" :style="provider === p.id ? 'color: #f0abfc' : 'color: #78716c'"></i>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <p class="text-stone-200 font-medium text-sm" x-text="p.name"></p>
+                  <span x-show="p.free" class="text-[10px] uppercase tracking-wider bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">free tier</span>
+                  <span x-show="p.local" class="text-[10px] uppercase tracking-wider bg-sky-500/20 text-sky-400 px-1.5 py-0.5 rounded">local</span>
+                </div>
+                <p class="text-stone-500 text-xs mt-0.5" x-text="p.description"></p>
+              </div>
+              <i x-show="provider === p.id" class="ph-fill ph-check-circle text-fuchsia-400 text-xl flex-shrink-0"></i>
+            </button>
+          </template>
+        </div>
+      </div>
+
+      <!-- API Key (only for cloud providers) -->
+      <div x-show="provider !== 'ollama'" class="mb-6 slide-in">
+        <label class="text-stone-400 text-xs font-semibold uppercase tracking-wider mb-3 block">
+          <span x-text="providerLabel(provider) + ' API key'"></span>
+        </label>
+        <div class="relative">
+          <input
+            :type="showKey ? 'text' : 'password'"
+            x-model="apiKeys[provider]"
+            @input="saveSettings()"
+            :placeholder="keyPlaceholder(provider)"
+            class="w-full bg-stone-900/50 border border-stone-800 rounded-lg px-4 py-3 pr-20 text-stone-100 placeholder-stone-600 focus:outline-none focus:border-fuchsia-500 transition-colors mono text-xs">
+          <button
+            @click="showKey = !showKey"
+            class="absolute right-3 top-1/2 -translate-y-1/2 text-stone-500 hover:text-stone-200 text-xs">
+            <i :class="showKey ? 'ph ph-eye-slash' : 'ph ph-eye'"></i>
+          </button>
+        </div>
+
+        <!-- Where to get the key -->
+        <div class="mt-3 p-3 bg-stone-900/30 border border-stone-800 rounded-lg text-xs">
+          <p class="text-stone-400 mb-1 flex items-center gap-2">
+            <i class="ph ph-info"></i>
+            Where to get it:
+          </p>
+          <a :href="keyUrl(provider)" target="_blank" class="text-fuchsia-400 hover:text-fuchsia-300 underline break-all mono" x-text="keyUrl(provider)"></a>
+          <p class="text-stone-500 mt-2 text-[11px]" x-text="keyHint(provider)"></p>
+        </div>
+
+        <p class="text-stone-600 text-[11px] mt-3 flex items-start gap-2">
+          <i class="ph ph-shield-check text-emerald-500 text-sm flex-shrink-0 mt-0.5"></i>
+          Your key is stored in <span class="mono text-stone-500">localStorage</span> of this browser only. It is sent to the backend per-request and never persisted server-side.
+        </p>
+      </div>
+
+      <!-- Model selector per provider -->
+      <div class="mb-6">
+        <label class="text-stone-400 text-xs font-semibold uppercase tracking-wider mb-3 block">Model</label>
+        <select
+          x-model="models[provider]"
+          @change="saveSettings()"
+          class="w-full bg-stone-900/50 border border-stone-800 rounded-lg px-4 py-3 text-stone-100 focus:outline-none focus:border-fuchsia-500 transition-colors mono text-sm">
+          <template x-for="m in modelsByProvider[provider]" :key="m.id">
+            <option :value="m.id" x-text="m.label"></option>
+          </template>
+        </select>
+        <p class="text-stone-600 text-[11px] mt-2" x-text="modelNote(provider)"></p>
+      </div>
+
+      <!-- Ollama help -->
+      <div x-show="provider === 'ollama'" class="p-3 bg-stone-900/30 border border-stone-800 rounded-lg text-xs mb-6 slide-in">
+        <p class="text-stone-400 mb-2 flex items-center gap-2">
+          <i class="ph ph-terminal"></i>
+          Make sure Ollama is running locally:
+        </p>
+        <pre class="bg-stone-950 p-2 rounded mono text-stone-300 text-[11px] overflow-x-auto">ollama serve
+ollama pull qwen2.5:7b</pre>
+        <p class="text-stone-500 mt-2">
+          Don't have it? Install from
+          <a href="https://ollama.com" target="_blank" class="text-fuchsia-400 hover:underline">ollama.com</a>
+        </p>
+      </div>
+
+      <div class="text-center">
+        <button @click="showSettings = false" class="btn-primary px-6 py-2 rounded-lg text-white font-medium text-sm">
+          Done
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="max-w-6xl mx-auto px-6 py-12">
+
+    <!-- Hero -->
+    <div class="text-center mb-12 slide-in">
+      <h2 class="text-4xl md:text-5xl font-bold text-stone-100 tracking-tight mb-4">
+        Turn videos into <span class="bg-gradient-to-r from-fuchsia-400 to-purple-400 bg-clip-text text-transparent">structured decisions</span>
+      </h2>
+      <p class="text-stone-400 max-w-2xl mx-auto text-lg">
+        Paste a YouTube URL. Get back a JSON with a clear <span class="text-fuchsia-400">watch it or skip it</span> decision, key concepts, risks, and questions.
+      </p>
+    </div>
+
+    <!-- Input Card -->
+    <div class="glass rounded-2xl p-6 mb-8 gradient-border slide-in" x-show="!result && !loading">
+
+      <!-- Tabs -->
+      <div class="flex gap-2 mb-6">
+        <button
+          @click="inputMode = 'url'"
+          class="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors"
+          :class="inputMode === 'url' ? 'tab-active' : 'border-stone-800 text-stone-400 hover:text-stone-200'">
+          <i class="ph ph-youtube-logo"></i>
+          YouTube URL
+        </button>
+        <button
+          @click="inputMode = 'file'"
+          class="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors"
+          :class="inputMode === 'file' ? 'tab-active' : 'border-stone-800 text-stone-400 hover:text-stone-200'">
+          <i class="ph ph-file-video"></i>
+          Local file
+        </button>
+      </div>
+
+      <!-- URL Input -->
+      <div x-show="inputMode === 'url'" class="space-y-4">
+        <label class="block">
+          <span class="text-stone-400 text-sm mb-2 block">YouTube URL</span>
+          <input
+            type="url"
+            x-model="url"
+            placeholder="https://www.youtube.com/watch?v=..."
+            class="w-full bg-stone-900/50 border border-stone-800 rounded-lg px-4 py-3 text-stone-100 placeholder-stone-600 focus:outline-none focus:border-fuchsia-500 transition-colors mono text-sm"
+            @keyup.enter="submit()">
+        </label>
+      </div>
+
+      <!-- File Input -->
+      <div x-show="inputMode === 'file'" class="space-y-4">
+        <label class="block">
+          <span class="text-stone-400 text-sm mb-2 block">Local file path</span>
+          <input
+            type="text"
+            x-model="filePath"
+            placeholder="/path/to/video.mp4 or /path/to/audio.wav"
+            class="w-full bg-stone-900/50 border border-stone-800 rounded-lg px-4 py-3 text-stone-100 placeholder-stone-600 focus:outline-none focus:border-fuchsia-500 transition-colors mono text-sm"
+            @keyup.enter="submit()">
+        </label>
+        <p class="text-stone-500 text-xs flex items-center gap-2">
+          <i class="ph ph-info"></i>
+          Supported: .mp4, .mkv, .webm, .mov, .avi, .wav, .mp3, .m4a, .flac
+        </p>
+      </div>
+
+      <!-- Active provider/model indicator -->
+      <div class="mt-6 flex items-center gap-3 p-3 bg-stone-900/30 border border-stone-800 rounded-lg">
+        <div class="w-8 h-8 rounded-lg bg-stone-900 flex items-center justify-center">
+          <i :class="providerIcon(provider) + ' text-fuchsia-400'"></i>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-stone-300 text-xs font-medium" x-text="providerLabel(provider)"></p>
+          <p class="text-stone-500 text-[11px] mono truncate" x-text="models[provider] || 'no model selected'"></p>
+        </div>
+        <button @click="showSettings = true" class="text-stone-500 hover:text-stone-200 text-xs flex items-center gap-1">
+          <i class="ph ph-gear"></i>
+          change
+        </button>
+      </div>
+
+      <!-- Warning if cloud provider without key -->
+      <div x-show="provider !== 'ollama' && !apiKeys[provider]"
+        class="mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs flex items-start gap-2">
+        <i class="ph ph-warning text-amber-400 text-lg flex-shrink-0"></i>
+        <div>
+          <p class="text-amber-200 font-medium" x-text="providerLabel(provider) + ' requires an API key'"></p>
+          <button @click="showSettings = true" class="text-amber-400 hover:text-amber-300 underline mt-1">Configure now</button>
+        </div>
+      </div>
+
+      <!-- Submit -->
+      <button
+        @click="submit()"
+        :disabled="!canSubmit()"
+        class="btn-primary w-full mt-6 py-3 rounded-lg text-white font-semibold flex items-center justify-center gap-2">
+        <i class="ph-fill ph-sparkle"></i>
+        Extract insights
+      </button>
+    </div>
+
+    <!-- Loading State -->
+    <div x-show="loading" class="glass rounded-2xl p-8 mb-8 gradient-border slide-in">
+      <div class="flex flex-col items-center gap-6">
+        <div class="relative">
+          <div class="w-16 h-16 rounded-full border-2 border-stone-800"></div>
+          <div class="w-16 h-16 rounded-full border-2 border-t-fuchsia-400 border-r-transparent border-b-transparent border-l-transparent absolute inset-0 animate-spin"></div>
+          <i class="ph-fill ph-lightning text-fuchsia-400 text-2xl absolute inset-0 m-auto"></i>
+        </div>
+        <div class="text-center">
+          <p class="text-stone-200 font-semibold mb-1" x-text="loadingStage"></p>
+          <p class="text-stone-500 text-sm" x-text="loadingHint"></p>
+        </div>
+        <!-- Progress steps -->
+        <div class="w-full max-w-md space-y-2">
+          <template x-for="(step, idx) in loadingSteps" :key="idx">
+            <div class="flex items-center gap-3 text-sm">
+              <div class="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold"
+                :class="step.done ? 'bg-emerald-500/20 text-emerald-400' : (step.active ? 'bg-fuchsia-500/20 text-fuchsia-400 animate-pulse' : 'bg-stone-800 text-stone-600')">
+                <i x-show="step.done" class="ph ph-check"></i>
+                <span x-show="!step.done" x-text="idx + 1"></span>
+              </div>
+              <span :class="step.done ? 'text-stone-300' : (step.active ? 'text-stone-200' : 'text-stone-600')" x-text="step.label"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- Error State -->
+    <div x-show="error" class="glass rounded-2xl p-6 mb-8 border border-red-500/30 slide-in">
+      <div class="flex items-start gap-4">
+        <div class="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center flex-shrink-0">
+          <i class="ph ph-warning text-red-400 text-xl"></i>
+        </div>
+        <div class="flex-1">
+          <h3 class="text-red-300 font-semibold mb-1">Extraction failed</h3>
+          <p class="text-red-200/80 text-sm mono" x-text="error"></p>
+          <button @click="reset()" class="mt-3 text-xs text-stone-400 hover:text-stone-100 underline">
+            try again
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Result -->
+    <div x-show="result" class="space-y-6 slide-in">
+
+      <!-- Decision Card -->
+      <div class="glass rounded-2xl p-6 gradient-border">
+        <div class="flex items-start gap-4">
+          <div class="w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0"
+            :class="result?.decision?.watch_full ? 'bg-emerald-500/20' : 'bg-amber-500/20'">
+            <i x-show="result?.decision?.watch_full" class="ph-fill ph-play-circle text-emerald-400 text-3xl"></i>
+            <i x-show="!result?.decision?.watch_full" class="ph-fill ph-skip-forward text-amber-400 text-3xl"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-3 mb-2">
+              <h3 class="text-stone-100 text-xl font-bold" x-text="result?.decision?.watch_full ? 'Watch it' : 'Skip it (or skim)'"></h3>
+              <span class="px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider"
+                :class="{
+                  'bg-emerald-500/20 text-emerald-400': result?.decision?.confidence === 'high',
+                  'bg-amber-500/20 text-amber-400': result?.decision?.confidence === 'medium',
+                  'bg-stone-500/20 text-stone-400': result?.decision?.confidence === 'low'
+                }"
+                x-text="result?.decision?.confidence + ' confidence'"></span>
+            </div>
+            <p class="text-stone-300 leading-relaxed" x-text="result?.decision?.rationale"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Source Info -->
+      <div class="glass rounded-2xl p-4 flex items-center gap-4 text-sm">
+        <i class="ph ph-link text-stone-500 text-lg"></i>
+        <div class="flex-1 min-w-0">
+          <p class="text-stone-300 truncate mono text-xs" x-text="result?.source?.url_or_path"></p>
+          <p class="text-stone-500 text-xs" x-text="formatDuration(result?.source?.duration_seconds) + ' · ' + result?.source?.type"></p>
+        </div>
+      </div>
+
+      <!-- Two-column grid for concepts and risks -->
+      <div class="grid md:grid-cols-2 gap-6">
+
+        <!-- Key Concepts -->
+        <div class="glass rounded-2xl p-6">
+          <div class="flex items-center gap-2 mb-4">
+            <i class="ph-fill ph-brain text-fuchsia-400 text-xl"></i>
+            <h3 class="text-stone-100 font-semibold">Key concepts</h3>
+            <span class="text-stone-600 text-xs mono" x-text="'(' + (result?.key_concepts?.length || 0) + ')'"></span>
+          </div>
+          <div class="space-y-4">
+            <template x-for="concept in result?.key_concepts || []">
+              <div class="border-l-2 border-fuchsia-500/50 pl-4">
+                <div class="flex items-baseline gap-2 mb-1">
+                  <h4 class="text-stone-200 font-semibold text-sm" x-text="concept.name"></h4>
+                  <span x-show="concept.timestamp_seconds" class="text-stone-600 text-xs mono" x-text="'@' + formatTimestamp(concept.timestamp_seconds)"></span>
+                </div>
+                <p class="text-stone-400 text-sm leading-relaxed" x-text="concept.explanation"></p>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Architectural Risks -->
+        <div class="glass rounded-2xl p-6">
+          <div class="flex items-center gap-2 mb-4">
+            <i class="ph-fill ph-warning-circle text-amber-400 text-xl"></i>
+            <h3 class="text-stone-100 font-semibold">Architectural risks</h3>
+            <span class="text-stone-600 text-xs mono" x-text="'(' + (result?.architectural_risks?.length || 0) + ')'"></span>
+          </div>
+          <div x-show="(result?.architectural_risks?.length || 0) === 0" class="text-stone-600 text-sm italic">
+            No architectural risks identified.
+          </div>
+          <ul class="space-y-3">
+            <template x-for="risk in result?.architectural_risks || []">
+              <li class="flex items-start gap-2 text-sm">
+                <i class="ph ph-caret-right text-amber-400 mt-0.5 flex-shrink-0"></i>
+                <span class="text-stone-300 leading-relaxed" x-text="risk"></span>
+              </li>
+            </template>
+          </ul>
+        </div>
+
+        <!-- Open Questions -->
+        <div class="glass rounded-2xl p-6">
+          <div class="flex items-center gap-2 mb-4">
+            <i class="ph-fill ph-question text-sky-400 text-xl"></i>
+            <h3 class="text-stone-100 font-semibold">Open questions</h3>
+            <span class="text-stone-600 text-xs mono" x-text="'(' + (result?.open_questions?.length || 0) + ')'"></span>
+          </div>
+          <ul class="space-y-3">
+            <template x-for="question in result?.open_questions || []">
+              <li class="flex items-start gap-2 text-sm">
+                <i class="ph ph-caret-right text-sky-400 mt-0.5 flex-shrink-0"></i>
+                <span class="text-stone-300 leading-relaxed" x-text="question"></span>
+              </li>
+            </template>
+          </ul>
+        </div>
+
+        <!-- Actionable Items -->
+        <div class="glass rounded-2xl p-6">
+          <div class="flex items-center gap-2 mb-4">
+            <i class="ph-fill ph-check-square text-emerald-400 text-xl"></i>
+            <h3 class="text-stone-100 font-semibold">Actionable items</h3>
+            <span class="text-stone-600 text-xs mono" x-text="'(' + (result?.actionable_items?.length || 0) + ')'"></span>
+          </div>
+          <div x-show="(result?.actionable_items?.length || 0) === 0" class="text-stone-600 text-sm italic">
+            No actionable items. Content is purely informational.
+          </div>
+          <ul class="space-y-3">
+            <template x-for="(item, idx) in result?.actionable_items || []" :key="idx">
+              <li class="flex items-start gap-2 text-sm">
+                <div class="w-4 h-4 rounded border border-stone-700 mt-0.5 flex-shrink-0"></div>
+                <span class="text-stone-300 leading-relaxed" x-text="item"></span>
+              </li>
+            </template>
+          </ul>
+        </div>
+
+      </div>
+
+      <!-- Metadata Footer -->
+      <div class="glass rounded-2xl p-4">
+        <div class="flex items-center gap-2 mb-3">
+          <i class="ph ph-gear text-stone-500"></i>
+          <h4 class="text-stone-400 text-xs font-semibold uppercase tracking-wider">Metadata</h4>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+          <div>
+            <p class="text-stone-600 mb-1">Transcription</p>
+            <p class="text-stone-300 mono" x-text="result?.metadata?.transcription_model"></p>
+            <p class="text-stone-500 mono" x-text="result?.metadata?.transcription_duration_seconds?.toFixed(1) + 's'"></p>
+          </div>
+          <div>
+            <p class="text-stone-600 mb-1">LLM</p>
+            <p class="text-stone-300 mono" x-text="result?.metadata?.llm_model"></p>
+            <p class="text-stone-500 mono" x-text="result?.metadata?.llm_duration_seconds?.toFixed(1) + 's'"></p>
+          </div>
+          <div>
+            <p class="text-stone-600 mb-1">Language</p>
+            <p class="text-stone-300 mono uppercase" x-text="result?.metadata?.language_detected"></p>
+          </div>
+          <div>
+            <p class="text-stone-600 mb-1">Schema</p>
+            <p class="text-stone-300 mono" x-text="'v' + result?.schema_version"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex flex-wrap gap-3">
+        <button @click="copyJSON()" class="flex items-center gap-2 px-4 py-2 bg-stone-900/50 hover:bg-stone-800/50 border border-stone-800 rounded-lg text-stone-300 text-sm transition-colors">
+          <i class="ph ph-copy"></i>
+          <span x-text="copied ? 'Copied!' : 'Copy JSON'"></span>
+        </button>
+        <button @click="downloadJSON()" class="flex items-center gap-2 px-4 py-2 bg-stone-900/50 hover:bg-stone-800/50 border border-stone-800 rounded-lg text-stone-300 text-sm transition-colors">
+          <i class="ph ph-download-simple"></i>
+          Download JSON
+        </button>
+        <button @click="reset()" class="flex items-center gap-2 px-4 py-2 bg-stone-900/50 hover:bg-stone-800/50 border border-stone-800 rounded-lg text-stone-300 text-sm transition-colors ml-auto">
+          <i class="ph ph-arrow-counter-clockwise"></i>
+          New extraction
+        </button>
+      </div>
+
+      <!-- Raw JSON (collapsible) -->
+      <details class="glass rounded-2xl p-4">
+        <summary class="cursor-pointer text-stone-400 text-sm hover:text-stone-200 transition-colors flex items-center gap-2">
+          <i class="ph ph-code"></i>
+          Raw JSON output
+        </summary>
+        <pre class="mt-4 p-4 bg-stone-950 rounded-lg overflow-x-auto text-xs text-stone-300 mono" x-text="JSON.stringify(result, null, 2)"></pre>
+      </details>
+
+    </div>
+
+    <!-- Footer -->
+    <footer class="mt-16 text-center text-stone-600 text-sm">
+      <p>
+        <a href="https://github.com/jrbs/Insights-Extract" target="_blank" class="hover:text-stone-400 transition-colors">Open source (MIT)</a>
+        ·
+        Build-in-Public episode 01 · Made by
+        <a href="https://www.linkedin.com/in/lhfsouza/" target="_blank" class="hover:text-stone-400 transition-colors">Luiz Souza</a>
+      </p>
+    </footer>
+
+  </main>
+
+  <script>
+    // Persist settings in localStorage — keys never leave the browser
+    const STORAGE_KEY = 'insights_extract_settings_v1';
+
+    function app() {
+      return {
+        inputMode: 'url',
+        url: '',
+        filePath: '',
+        loading: false,
+        loadingStage: '',
+        loadingHint: '',
+        loadingSteps: [],
+        result: null,
+        error: '',
+        copied: false,
+        backendOnline: false,
+
+        // Provider + keys (persisted)
+        provider: 'ollama',
+        apiKeys: {
+          ollama: '',
+          openrouter: '',
+          huggingface: '',
+        },
+        models: {
+          ollama: 'qwen2.5:7b',
+          openrouter: 'meta-llama/llama-3.1-8b-instruct:free',
+          huggingface: 'meta-llama/Llama-3.1-8B-Instruct',
+        },
+        showSettings: false,
+        showKey: false,
+
+        // Static catalog — kept in sync with src/llm.py PROVIDERS
+        providerList: [
+          {
+            id: 'ollama',
+            name: 'Ollama (local)',
+            description: 'Run Qwen/Llama/Mistral locally. Zero cost, full privacy, needs Ollama installed.',
+            icon: 'ph-fill ph-desktop',
+            local: true,
+            free: false,
+          },
+          {
+            id: 'openrouter',
+            name: 'OpenRouter',
+            description: 'Unified gateway to 300+ models (Claude, GPT, Llama, Gemini). Pay-per-use + free tier.',
+            icon: 'ph-fill ph-globe',
+            local: false,
+            free: true,
+          },
+          {
+            id: 'huggingface',
+            name: 'Hugging Face',
+            description: 'Inference Providers router. Free tier for open models, no vendor lock-in.',
+            icon: 'ph-fill ph-smiley',
+            local: false,
+            free: true,
+          },
+        ],
+
+        modelsByProvider: {
+          ollama: [
+            { id: 'qwen2.5:7b', label: 'qwen2.5:7b (default, balanced)' },
+            { id: 'qwen2.5:14b', label: 'qwen2.5:14b (better, slower)' },
+            { id: 'llama3.1:8b', label: 'llama3.1:8b (alternative)' },
+            { id: 'mistral:7b', label: 'mistral:7b (lightweight)' },
+            { id: 'gemma2:9b', label: 'gemma2:9b (Google)' },
+          ],
+          openrouter: [
+            { id: 'meta-llama/llama-3.1-8b-instruct:free', label: 'Llama 3.1 8B (free)' },
+            { id: 'meta-llama/llama-3.1-70b-instruct', label: 'Llama 3.1 70B' },
+            { id: 'anthropic/claude-3.5-sonnet', label: 'Claude 3.5 Sonnet' },
+            { id: 'anthropic/claude-3-haiku', label: 'Claude 3 Haiku (fast)' },
+            { id: 'openai/gpt-4o', label: 'GPT-4o' },
+            { id: 'openai/gpt-4o-mini', label: 'GPT-4o mini (fast)' },
+            { id: 'google/gemini-pro-1.5', label: 'Gemini 1.5 Pro' },
+            { id: 'mistralai/mistral-large', label: 'Mistral Large' },
+            { id: 'qwen/qwen-2.5-72b-instruct', label: 'Qwen 2.5 72B' },
+          ],
+          huggingface: [
+            { id: 'meta-llama/Llama-3.1-8B-Instruct', label: 'Llama 3.1 8B' },
+            { id: 'meta-llama/Llama-3.1-70B-Instruct', label: 'Llama 3.1 70B' },
+            { id: 'mistralai/Mixtral-8x7B-Instruct-v0.1', label: 'Mixtral 8x7B' },
+            { id: 'Qwen/Qwen2.5-72B-Instruct', label: 'Qwen 2.5 72B' },
+            { id: 'deepseek-ai/DeepSeek-V3', label: 'DeepSeek V3' },
+            { id: 'google/gemma-2-9b-it', label: 'Gemma 2 9B' },
+          ],
+        },
+
+        init() {
+          this.loadSettings();
+          this.checkBackend();
+          setInterval(() => this.checkBackend(), 10000);
+        },
+
+        loadSettings() {
+          try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) return;
+            const saved = JSON.parse(raw);
+            if (saved.provider) this.provider = saved.provider;
+            if (saved.apiKeys) Object.assign(this.apiKeys, saved.apiKeys);
+            if (saved.models) Object.assign(this.models, saved.models);
+          } catch (e) {
+            console.warn('[settings] failed to load:', e);
+          }
+        },
+
+        saveSettings() {
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({
+              provider: this.provider,
+              apiKeys: this.apiKeys,
+              models: this.models,
+            }));
+          } catch (e) {
+            console.warn('[settings] failed to save:', e);
+          }
+        },
+
+        providerLabel(id) {
+          const p = this.providerList.find(x => x.id === id);
+          return p ? p.name : id;
+        },
+
+        providerIcon(id) {
+          const p = this.providerList.find(x => x.id === id);
+          return p ? p.icon : 'ph ph-circle';
+        },
+
+        keyUrl(id) {
+          return {
+            openrouter: 'https://openrouter.ai/keys',
+            huggingface: 'https://huggingface.co/settings/tokens',
+          }[id] || '';
+        },
+
+        keyHint(id) {
+          return {
+            openrouter: 'Create a free account, add credit (optional), generate a key. Free tier works without credit.',
+            huggingface: 'Sign in with your HF account, create a token with "Inference" permission.',
+          }[id] || '';
+        },
+
+        keyPlaceholder(id) {
+          return {
+            openrouter: 'sk-or-v1-...',
+            huggingface: 'hf_...',
+          }[id] || '';
+        },
+
+        modelNote(id) {
+          return {
+            ollama: 'Pull the model first: `ollama pull <model>`',
+            openrouter: 'Models with :free suffix have no cost.',
+            huggingface: 'Uses HuggingFace unified router (router.huggingface.co).',
+          }[id] || '';
+        },
+
+        async checkBackend() {
+          try {
+            const res = await fetch('/api/health');
+            this.backendOnline = res.ok;
+          } catch {
+            this.backendOnline = false;
+          }
+        },
+
+        canSubmit() {
+          if (this.loading) return false;
+          if (this.inputMode === 'url' && !this.url.trim()) return false;
+          if (this.inputMode === 'file' && !this.filePath.trim()) return false;
+          if (this.provider !== 'ollama' && !this.apiKeys[this.provider]) return false;
+          return true;
+        },
+
+        async submit() {
+          if (!this.canSubmit()) return;
+
+          this.loading = true;
+          this.error = '';
+          this.result = null;
+
+          this.loadingSteps = [
+            { label: 'Validating input', done: false, active: true },
+            { label: 'Downloading / reading audio', done: false, active: false },
+            { label: 'Transcribing with Whisper', done: false, active: false },
+            { label: 'Extracting insights with LLM', done: false, active: false },
+            { label: 'Validating schema', done: false, active: false },
+          ];
+          this.loadingStage = 'Starting extraction...';
+          this.loadingHint = this.provider === 'ollama'
+            ? 'Running fully local. This may take 1-3 minutes.'
+            : 'Using ' + this.providerLabel(this.provider) + '. Should be faster than local.';
+
+          this.animateSteps();
+
+          try {
+            const input = this.inputMode === 'url' ? this.url : this.filePath;
+            const res = await fetch('/api/extract', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                input,
+                provider: this.provider,
+                model: this.models[this.provider],
+                api_key: this.apiKeys[this.provider],
+              })
+            });
+
+            if (!res.ok) {
+              const errData = await res.json().catch(() => ({ error: 'unknown error' }));
+              throw new Error(errData.error || `HTTP ${res.status}`);
+            }
+
+            const data = await res.json();
+            this.result = data;
+            this.loadingSteps.forEach(s => { s.done = true; s.active = false; });
+          } catch (err) {
+            this.error = err.message;
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        animateSteps() {
+          const stages = [
+            { label: 'Validating input...', hint: 'Checking URL format and input type.' },
+            { label: 'Downloading audio...', hint: 'Using yt-dlp to fetch YouTube audio.' },
+            { label: 'Transcribing with Whisper...', hint: 'Running locally on your machine. No cloud.' },
+            { label: 'Extracting insights...', hint: 'Ollama is analyzing the transcript.' },
+            { label: 'Validating output...', hint: 'Making sure the JSON matches the schema.' },
+          ];
+
+          let idx = 0;
+          const interval = setInterval(() => {
+            if (!this.loading) {
+              clearInterval(interval);
+              return;
+            }
+            if (idx < this.loadingSteps.length) {
+              if (idx > 0) {
+                this.loadingSteps[idx - 1].done = true;
+                this.loadingSteps[idx - 1].active = false;
+              }
+              this.loadingSteps[idx].active = true;
+              this.loadingStage = stages[idx].label;
+              this.loadingHint = stages[idx].hint;
+              idx++;
+            }
+          }, 8000);
+        },
+
+        reset() {
+          this.result = null;
+          this.error = '';
+          this.loading = false;
+          this.url = '';
+          this.filePath = '';
+          this.loadingSteps = [];
+        },
+
+        copyJSON() {
+          navigator.clipboard.writeText(JSON.stringify(this.result, null, 2));
+          this.copied = true;
+          setTimeout(() => this.copied = false, 2000);
+        },
+
+        downloadJSON() {
+          const blob = new Blob([JSON.stringify(this.result, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `insights-${Date.now()}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+        },
+
+        formatDuration(seconds) {
+          if (!seconds) return '';
+          const m = Math.floor(seconds / 60);
+          const s = seconds % 60;
+          return `${m}m ${s}s`;
+        },
+
+        formatTimestamp(seconds) {
+          if (seconds === null || seconds === undefined) return '';
+          const m = Math.floor(seconds / 60);
+          const s = seconds % 60;
+          return `${m}:${s.toString().padStart(2, '0')}`;
+        }
+      };
+    }
+  </script>
+</body>
+</html>

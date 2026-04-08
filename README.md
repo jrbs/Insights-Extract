@@ -2,9 +2,9 @@
 
 > **How do you extract structured insights from YouTube videos using a local LLM?** This is the script I wrote to answer that question for myself — and the first episode of a build-in-public series on turning a learning POC into a working QA + Architecture system.
 
-A small Python script that takes a YouTube URL (or a local video file), transcribes it locally with Whisper, and uses a local LLM (Ollama + qwen2.5:7b) to return a structured JSON with the key concepts, architectural risks, open questions, and a clear "is this worth watching in full?" decision.
+A small Python script that takes a YouTube URL (or a local video file), transcribes it locally with Whisper, and uses an LLM to return a structured JSON with the key concepts, architectural risks, open questions, and a clear "is this worth watching in full?" decision.
 
-**No cloud. No API keys. No external services.** Runs end-to-end on a laptop.
+**Runs local-first with [Ollama](https://ollama.com) — no cloud, no API keys, no external services.** If you want a bigger model for harder content, you can optionally swap in **OpenRouter** or **HuggingFace** with a single flag. Transcription always stays local.
 
 ---
 
@@ -47,6 +47,26 @@ python -m src.extract <url> --output insights.json
 ```
 
 The output is a single JSON document printed to stdout. Use `--output insights.json` to save to a file.
+
+### Optional: use a cloud model instead of Ollama
+
+If you want a larger model without running it locally, the script supports two cloud backends via the same interface. **Transcription always stays local** — only the final reasoning step hits the network.
+
+```bash
+# OpenRouter (proxy to Claude, GPT-4o, Llama 70B, Mistral, Gemini, etc.)
+export OPENROUTER_API_KEY=sk-or-...
+python -m src.extract <url> \
+    --provider openrouter \
+    --model anthropic/claude-3.5-sonnet
+
+# HuggingFace Inference Providers (Llama 70B, Mixtral, Qwen 72B, DeepSeek, etc.)
+export HUGGINGFACE_API_KEY=hf_...
+python -m src.extract <url> \
+    --provider huggingface \
+    --model meta-llama/Llama-3.1-70B-Instruct
+```
+
+Get an API key at [openrouter.ai/keys](https://openrouter.ai/keys) or [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens). OpenRouter has a free tier (`:free` suffix on the model name). The CLI flag `--api-key` is also supported if you'd rather not use env vars.
 
 ### System requirements verified
 
@@ -91,8 +111,10 @@ A **structured insight** is the result of forcing an LLM to answer inside a pred
 | Python | 3.10+ | type hints, modern syntax |
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | ≥ 2024.x | YouTube audio download |
 | [openai-whisper](https://github.com/openai/whisper) | latest | local speech-to-text |
-| [Ollama](https://ollama.com) | ≥ 0.1 | local LLM runtime |
-| [qwen2.5:7b](https://ollama.com/library/qwen2.5) | — | default model (swap with `--model`) |
+| [Ollama](https://ollama.com) | ≥ 0.1 | local LLM runtime (default) |
+| [qwen2.5:7b](https://ollama.com/library/qwen2.5) | — | default Ollama model |
+| [OpenRouter](https://openrouter.ai) | — | optional cloud backend (OpenAI-compatible) |
+| [HuggingFace Inference Providers](https://huggingface.co/docs/inference-providers) | — | optional cloud backend (OpenAI-compatible) |
 | [pydantic](https://docs.pydantic.dev) | ≥ 2.0 | output schema validation |
 
 You will also need [`ffmpeg`](https://ffmpeg.org/download.html) installed system-wide (Whisper depends on it).
@@ -102,7 +124,7 @@ You will also need [`ffmpeg`](https://ffmpeg.org/download.html) installed system
 Honest list of what this script does badly, so you can decide if it fits your case:
 
 - **Single video at a time.** No batch, no queue, no database. If you want a searchable knowledge base across many videos, that's [Episode 02](#about-the-series) of this series.
-- **Local-only by design.** No fallback to cloud LLMs. If your laptop can't run Ollama + a 7B model, this won't work for you. That's a feature, not a bug — the point is zero external dependency.
+- **Local-first by default.** Ollama is the default backend; cloud providers are opt-in via flag. Transcription always runs locally — only the reasoning step can be moved to the cloud if you want a bigger model.
 - **Whisper is slow on CPU.** A 60-minute video takes 5–8 minutes to transcribe on an M-series Mac. Worth it for privacy and zero cost. If you need real-time, this isn't the tool.
 - **Output language follows the input.** No automatic translation. If your video is in English, the JSON comes back in English. If it's in Portuguese, it comes back in Portuguese.
 - **No retries beyond schema validation.** If the LLM gives invalid JSON twice in a row, the script fails loudly instead of guessing. This is intentional — silent guesses corrupt downstream pipelines.
@@ -110,11 +132,16 @@ Honest list of what this script does badly, so you can decide if it fits your ca
 ## How to run on a different model
 
 ```bash
+# Any Ollama-compatible model
 python -m src.extract <input> --model llama3.1:8b
 python -m src.extract <input> --model qwen2.5:14b
+
+# Or a cloud model via OpenRouter / HuggingFace (see Quick start)
+python -m src.extract <input> --provider openrouter --model anthropic/claude-3.5-sonnet
+python -m src.extract <input> --provider huggingface --model meta-llama/Llama-3.1-70B-Instruct
 ```
 
-Any Ollama-compatible model works. Larger models give better adherence to the schema at the cost of latency.
+Larger models give better adherence to the schema at the cost of latency (and cost, if you're on cloud). The contract is the same across all backends — switching providers never changes the shape of the output JSON.
 
 ## About the series
 
