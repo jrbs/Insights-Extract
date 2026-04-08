@@ -48,6 +48,22 @@ python -m src.extract <url> --output insights.json
 
 The output is a single JSON document printed to stdout. Use `--output insights.json` to save to a file.
 
+### Prefer clicking? Run the web UI
+
+The repo ships with a small single-file web frontend. **Back-end and front-end are the same Python process** — one command starts both. No Node, no build step, no second terminal.
+
+```bash
+# Same setup as the CLI above (venv + deps + ollama pull) — skip if done.
+
+# Start the web server (serves HTML + /api/* on port 8765)
+python -m web.server
+
+# Open it in a browser
+open http://localhost:8765
+```
+
+You get a provider selector (Ollama / OpenRouter / HuggingFace), a settings drawer to paste API keys (stored in `localStorage`, never on the server), and a result view with decision card, key concepts, risks and questions. Full details in [`web/README.md`](web/README.md).
+
 ### Optional: use a cloud model instead of Ollama
 
 If you want a larger model without running it locally, the script supports two cloud backends via the same interface. **Transcription always stays local** — only the final reasoning step hits the network.

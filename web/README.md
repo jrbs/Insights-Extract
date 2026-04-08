@@ -17,6 +17,8 @@ Dark theme, no build step, no npm, no bundler. Single HTML file + single Python 
 
 ## How to run
 
+> **One process, not two.** `python -m web.server` is both the front-end (serves `index.html`) **and** the back-end (exposes `/api/*` endpoints). Same port, same process. You don't need a second terminal for a separate API server.
+
 From the repo root:
 
 ```bash
@@ -26,10 +28,13 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ollama pull qwen2.5:7b
 
-# 2. Start the web server (runs on port 8765 by default)
+# 2. Make sure Ollama is running (in another terminal, or as a background service)
+ollama serve &
+
+# 3. Start the web server — serves HTML + /api/* on port 8765
 python -m web.server
 
-# 3. Open it in a browser
+# 4. Open it in a browser
 open http://localhost:8765
 ```
 
@@ -38,6 +43,18 @@ You can also bind to a different host/port:
 ```bash
 python -m web.server --host 0.0.0.0 --port 9000
 ```
+
+### Quick smoke test (before opening the browser)
+
+```bash
+# Terminal where the server is running should show "[web] insights-extract UI running at http://127.0.0.1:8765"
+
+# In another terminal, hit the health and providers endpoints
+curl http://localhost:8765/api/health
+curl http://localhost:8765/api/providers
+```
+
+If both return JSON, the back-end is wired correctly — just open the URL in the browser.
 
 ## How it is wired
 
