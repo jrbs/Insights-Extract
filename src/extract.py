@@ -99,8 +99,14 @@ def download_youtube_audio(url: str) -> str:
         output_template = "downloads/%(title)s-%(id)s.%(ext)s"
         Path("downloads").mkdir(exist_ok=True)
 
+        # Run yt-dlp as a Python module instead of the `yt-dlp` binary.
+        # This way the current interpreter's site-packages is used, so it works
+        # even when the venv is active but not exported via PATH (e.g. when the
+        # web server is launched with `.venv/bin/python -m web.server`).
         cmd = [
-            "yt-dlp",
+            sys.executable,
+            "-m",
+            "yt_dlp",
             "--extract-audio",
             "--audio-format",
             "wav",
@@ -115,7 +121,14 @@ def download_youtube_audio(url: str) -> str:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
 
         if result.returncode != 0:
-            raise RuntimeError(f"[yt-dlp] error: {result.stderr}")
+            # Distinguish "module not installed" from actual download failures
+            stderr = (result.stderr or "").strip()
+            if "No module named" in stderr and "yt_dlp" in stderr:
+                raise RuntimeError(
+                    "[yt-dlp] error: yt_dlp not installed in the current "
+                    "Python environment. Install with: pip install yt-dlp"
+                )
+            raise RuntimeError(f"[yt-dlp] error: {stderr}")
 
         # Encontrar arquivo baixado
         for wav_file in Path("downloads").glob("*.wav"):
@@ -123,10 +136,6 @@ def download_youtube_audio(url: str) -> str:
 
         raise RuntimeError("[yt-dlp] error: no audio file found after download")
 
-    except FileNotFoundError:
-        raise RuntimeError(
-            "[yt-dlp] error: yt-dlp not installed. Install with: pip install yt-dlp"
-        )
     except subprocess.TimeoutExpired:
         raise RuntimeError("[yt-dlp] error: download timeout (>10 min)")
 
@@ -158,30 +167,28 @@ def validate_input(input_path: str) -> tuple[str, str, int]:
         (type, file_path, duration_seconds) where type is 'youtube', 'local_video', or 'local_audio'
 
     Raises:
-        SystemExit: With appropriate exit code if invalid
+        ValueError: With a human-readable message if the input is invalid.
+                    The CLI catches this and converts it to sys.exit(EXIT_INVALID_INPUT)
+                    in main(); the web server surfaces the message in the HTTP response.
     """
     # Check if URL
     if input_path.startswith("http"):
         if not validate_url(input_path):
-            error_exit(
+            raise ValueError(
                 "[extract] error: invalid YouTube URL. "
-                "Expected: https://www.youtube.com/watch?v=XXX or https://youtu.be/XXX",
-                EXIT_INVALID_INPUT,
+                "Expected: https://www.youtube.com/watch?v=XXX or https://youtu.be/XXX"
             )
         try:
             audio_path = download_youtube_audio(input_path)
             duration = get_video_duration_seconds(audio_path)
             return "youtube", audio_path, duration
         except RuntimeError as e:
-            error_exit(str(e), EXIT_INVALID_INPUT)
+            raise ValueError(str(e)) from e
 
     # Check if local file
     file_path = Path(input_path)
     if not file_path.exists():
-        error_exit(
-            f"[extract] error: file not found: {input_path}",
-            EXIT_INVALID_INPUT,
-        )
+        raise ValueError(f"[extract] error: file not found: {input_path}")
 
     # Determine file type
     audio_extensions = {".wav", ".mp3", ".m4a", ".flac"}
@@ -192,17 +199,16 @@ def validate_input(input_path: str) -> tuple[str, str, int]:
     elif file_path.suffix.lower() in audio_extensions:
         input_type = "local_audio"
     else:
-        error_exit(
+        raise ValueError(
             f"[extract] error: unsupported file type {file_path.suffix}. "
-            f"Supported: {audio_extensions | video_extensions}",
-            EXIT_INVALID_INPUT,
+            f"Supported: {audio_extensions | video_extensions}"
         )
 
     # Get duration
     try:
         duration = get_video_duration_seconds(input_path)
     except RuntimeError as e:
-        error_exit(str(e), EXIT_INVALID_INPUT)
+        raise ValueError(str(e)) from e
 
     return input_type, input_path, duration
 
@@ -315,8 +321,8 @@ def extract(
     print(f"[extract] validating input...")
     try:
         input_type, file_path, duration = validate_input(input_path)
-    except SystemExit:
-        raise
+    except ValueError as e:
+        error_exit(str(e), EXIT_INVALID_INPUT)
 
     print(f"[extract] duration: {duration}s ({duration // 60}m {duration % 60}s)")
 

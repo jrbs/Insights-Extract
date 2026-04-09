@@ -172,11 +172,9 @@ class InsightExtractHandler(BaseHTTPRequestHandler):
         """
         import time
 
-        # Validate input (CLI may call sys.exit — we catch it and re-raise)
-        try:
-            input_type, file_path, duration = validate_input(input_value)
-        except SystemExit as e:
-            raise ValueError(f"invalid input: exit code {e.code}")
+        # validate_input now raises ValueError with a human-readable message
+        # on any bad input (invalid URL, missing file, unsupported type, etc.)
+        input_type, file_path, duration = validate_input(input_value)
 
         if duration > 180 * 60:
             raise ValueError(f"video too long ({duration // 60} min, max 180)")
