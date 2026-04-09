@@ -14,9 +14,18 @@ import argparse
 import json
 import sys
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+
+
+def _utcnow() -> datetime:
+    """Return a timezone-aware UTC datetime.
+
+    Thin wrapper around datetime.now(timezone.utc) so the rest of the file
+    stays readable. Avoids the Python 3.12 DeprecationWarning from utcnow().
+    """
+    return datetime.now(timezone.utc)
 
 # Import the extract pipeline (parent src/)
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -79,7 +88,7 @@ class InsightExtractHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/api/health":
-            self._send_json(200, {"status": "ok", "timestamp": datetime.utcnow().isoformat()})
+            self._send_json(200, {"status": "ok", "timestamp": _utcnow().isoformat()})
             return
 
         if self.path == "/api/providers":
@@ -197,7 +206,7 @@ class InsightExtractHandler(BaseHTTPRequestHandler):
         insight.metadata.transcription_duration_seconds = transcribe_duration
         insight.metadata.llm_duration_seconds = llm_duration
         insight.metadata.llm_model = f"{provider}:{effective_model}"
-        insight.metadata.extracted_at = datetime.utcnow()
+        insight.metadata.extracted_at = _utcnow()
 
         return json.loads(insight.model_dump_json())
 

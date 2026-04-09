@@ -22,7 +22,7 @@ import os
 import re
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import NoReturn
 
@@ -372,7 +372,7 @@ def extract(
     insight.metadata.transcription_duration_seconds = transcribe_duration
     insight.metadata.llm_duration_seconds = llm_duration
     insight.metadata.llm_model = f"{provider}:{effective_model}"
-    insight.metadata.extracted_at = datetime.utcnow()
+    insight.metadata.extracted_at = datetime.now(timezone.utc)
 
     # 6. Output
     output_json = json.loads(insight.model_dump_json(by_alias=False, exclude_none=True))
