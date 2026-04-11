@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "source": {
     "type": "youtube",
     "url_or_path": "https://www.youtube.com/watch?v=example",
@@ -11,6 +11,8 @@
     "confidence": "high",
     "rationale": "Vídeo curto, denso, com exemplos de código reais. Vale assistir se você quer entender ports & adapters sem teoria abstrata."
   },
+  "summary": "Introdução aplicada ao estilo Hexagonal Architecture (ports & adapters). Foca na separação entre lógica de negócio e infraestrutura via interfaces, usando exemplos em código real em vez de teoria. Público-alvo: devs que já ouviram falar de DDD e querem ver como aplicar sem abstração excessiva.",
+  "core_thesis": "A lógica de negócio só fica testável quando para de depender dos detalhes de infraestrutura — ports & adapters é o contrato que torna essa separação explícita.",
   "key_concepts": [
     {
       "name": "Ports and Adapters",
@@ -28,24 +30,27 @@
       "timestamp_seconds": 240
     }
   ],
-  "architectural_risks": [
-    "Risco de over-engineering quando aplicado a CRUDs simples sem lógica complexa",
-    "Curva de aprendizado alta para times sem experiência prévia em DDD e padrões de arquitetura"
+  "caveats": [
+    "Não discute o custo de over-engineering quando aplicado a CRUDs simples sem lógica complexa",
+    "Assume familiaridade prévia com DDD sem explicitar o pré-requisito para o time"
   ],
   "open_questions": [
     "Como aplicar isso em projetos legados sem big bang refactor?",
     "Qual a granularidade ideal de adapters em microserviços?",
     "Como integrar com frameworks que exigem dependência direta do core?"
   ],
-  "actionable_items": [
+  "actionable_takeaways": [
     "Identificar 1 service do seu projeto atual e mapear quais são os ports",
     "Escrever um adapter de teste em memória para um repository existente",
     "Refatorar 1 função crítica usando ports para separar lógica de I/O"
   ],
+  "notable_quotes": [
+    "The domain should not know how it is persisted — and should not care."
+  ],
   "metadata": {
     "extracted_at": "2026-04-08T14:23:00Z",
-    "transcription_model": "whisper-base",
-    "llm_model": "qwen2.5:7b",
+    "transcription_model": "whisper-small",
+    "llm_model": "ollama:qwen2.5:7b",
     "transcription_duration_seconds": 23.4,
     "llm_duration_seconds": 18.7,
     "language_detected": "en"

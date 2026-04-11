@@ -14,9 +14,22 @@ import argparse
 import json
 import sys
 import traceback
+import urllib.parse
+import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+
+# Upload limits — reject files bigger than this to protect the local machine.
+# 500MB is enough for most videos that fit the 180min pipeline limit.
+MAX_UPLOAD_BYTES = 500 * 1024 * 1024
+UPLOADS_DIR = Path(__file__).parent.parent / "uploads"
+
+# Accepted extensions — MUST match src/extract.py::validate_input
+ALLOWED_EXTENSIONS = {
+    ".mp4", ".mkv", ".webm", ".mov", ".avi",  # video
+    ".wav", ".mp3", ".m4a", ".flac",           # audio
+}
 
 
 def _utcnow() -> datetime:
@@ -31,7 +44,7 @@ def _utcnow() -> datetime:
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.extract import extract as run_extract, validate_input
-from src.extract import build_prompt
+from src.prompts import build_prompt
 from src.llm import (
     LLMConnectionError,
     LLMValidationError,
@@ -109,6 +122,10 @@ class InsightExtractHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         """Route POST requests."""
+        if self.path == "/api/upload":
+            self._handle_upload()
+            return
+
         if self.path != "/api/extract":
             self._send_json(404, {"error": "not found"})
             return
@@ -158,6 +175,84 @@ class InsightExtractHandler(BaseHTTPRequestHandler):
             traceback.print_exc()
             self._send_json(500, {"error": f"internal error: {e}"})
 
+    def _handle_upload(self) -> None:
+        """Accept a raw binary file upload and stream it to disk.
+
+        Wire format:
+          POST /api/upload
+          Content-Type: application/octet-stream
+          Content-Length: <bytes>
+          X-Filename: <url-encoded original filename>
+          <body = raw file bytes>
+
+        Why raw bytes instead of multipart/form-data? The stdlib HTTP server
+        does not natively parse multipart, and for a single-file upload the
+        raw-body pattern is simpler, faster, and has no extra dependency.
+        """
+        length = int(self.headers.get("Content-Length", 0))
+        if length == 0:
+            self._send_json(400, {"error": "empty upload"})
+            return
+
+        if length > MAX_UPLOAD_BYTES:
+            self._send_json(
+                413,
+                {"error": f"file too large ({length // (1024 * 1024)} MB, "
+                          f"max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)"},
+            )
+            return
+
+        # Extract and sanitize filename
+        raw_name = self.headers.get("X-Filename", "upload.bin")
+        try:
+            original_name = urllib.parse.unquote(raw_name)
+        except Exception:
+            original_name = "upload.bin"
+
+        ext = Path(original_name).suffix.lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            self._send_json(
+                400,
+                {"error": f"unsupported file type '{ext}'. "
+                          f"Allowed: {sorted(ALLOWED_EXTENSIONS)}"},
+            )
+            return
+
+        # Generate a collision-free name but keep the extension so that
+        # src/extract.py::validate_input recognizes the file type downstream
+        safe_name = f"{uuid.uuid4().hex[:12]}{ext}"
+        UPLOADS_DIR.mkdir(exist_ok=True)
+        target = UPLOADS_DIR / safe_name
+
+        # Stream the body to disk in chunks — avoids loading the whole file
+        # into memory for large videos
+        try:
+            with open(target, "wb") as f:
+                remaining = length
+                while remaining > 0:
+                    chunk = self.rfile.read(min(64 * 1024, remaining))
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    remaining -= len(chunk)
+        except Exception as e:
+            # Cleanup partial file on failure
+            try:
+                target.unlink(missing_ok=True)
+            except Exception:
+                pass
+            traceback.print_exc()
+            self._send_json(500, {"error": f"write failed: {e}"})
+            return
+
+        # Return the absolute path — the frontend will pass it straight to
+        # /api/extract as the `input` field. Absolute means no cwd confusion.
+        self._send_json(200, {
+            "path": str(target.resolve()),
+            "size": length,
+            "name": original_name,
+        })
+
     def _run_pipeline(
         self,
         input_value: str,
@@ -172,24 +267,31 @@ class InsightExtractHandler(BaseHTTPRequestHandler):
         """
         import time
 
-        # validate_input now raises ValueError with a human-readable message
-        # on any bad input (invalid URL, missing file, unsupported type, etc.)
-        input_type, file_path, duration = validate_input(input_value)
+        input_type, file_path, duration, title = validate_input(input_value)
 
         if duration > 180 * 60:
             raise ValueError(f"video too long ({duration // 60} min, max 180)")
 
-        print(f"[web] transcribing ({duration}s)...")
+        whisper_model = "small"
+        print(f"[web] transcribing with whisper-{whisper_model} ({duration}s)...")
         transcribe_start = time.time()
-        transcript = transcribe(file_path, model_name="base")
+        transcription = transcribe(file_path, model_name=whisper_model)
         transcribe_duration = time.time() - transcribe_start
 
-        if not transcript:
+        if not transcription.text:
             raise ValueError("no audio detected in file")
 
         effective_model = model or PROVIDERS[provider]["default_model"]
         print(f"[web] calling LLM [{provider}] {effective_model}...")
-        prompt = build_prompt(transcript)
+        prompt = build_prompt(
+            transcription.text,
+            source_type=input_type,
+            source_url_or_path=input_value,
+            source_title=title,
+            duration_seconds=duration,
+            language_detected=transcription.language,
+            segments=transcription.segments,
+        )
         llm_start = time.time()
         insight = call_llm(
             prompt=prompt,
@@ -200,11 +302,19 @@ class InsightExtractHandler(BaseHTTPRequestHandler):
         )
         llm_duration = time.time() - llm_start
 
-        # Patch metadata with measured values (the LLM may have hallucinated them)
+        # Inject source + metadata com valores reais (nao confiar no LLM)
+        insight.source.type = input_type
+        insight.source.url_or_path = input_value
+        insight.source.duration_seconds = duration
+        if title:
+            insight.source.title = title
+
         insight.metadata.transcription_duration_seconds = transcribe_duration
         insight.metadata.llm_duration_seconds = llm_duration
         insight.metadata.llm_model = f"{provider}:{effective_model}"
         insight.metadata.extracted_at = _utcnow()
+        insight.metadata.language_detected = transcription.language
+        insight.metadata.transcription_model = f"whisper-{whisper_model}"
 
         return json.loads(insight.model_dump_json())
 

@@ -4,12 +4,12 @@ A small single-file web frontend for `insights-extract`. Useful if you prefer cl
 
 ## What it looks like
 
-- A clean input card (YouTube URL or local file path)
+- A clean input card (YouTube URL or click-to-pick local file uploader)
 - **Provider selector** — Ollama (local, default), OpenRouter, or HuggingFace
 - **Per-provider model selector** with curated lists (qwen, llama, claude, gpt-4o, mixtral, etc.)
 - **Settings drawer** to paste your OpenRouter / HuggingFace token — saved locally in the browser, never sent to any third party
 - Live progress while Whisper transcribes and the LLM extracts
-- Result view with color-coded decision card, key concepts, risks, questions and actionable items
+- Result view with color-coded decision card, summary, core thesis, key concepts, caveats, open questions, actionable takeaways, and notable quotes
 - Copy / download JSON buttons
 - Collapsible raw JSON inspector
 

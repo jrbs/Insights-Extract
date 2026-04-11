@@ -2,7 +2,7 @@
 
 > **How do you extract structured insights from YouTube videos using a local LLM?** This is the script I wrote to answer that question for myself — and the first episode of a build-in-public series on turning a learning POC into a working QA + Architecture system.
 
-A small Python script that takes a YouTube URL (or a local video file), transcribes it locally with Whisper, and uses an LLM to return a structured JSON with the key concepts, architectural risks, open questions, and a clear "is this worth watching in full?" decision.
+A small Python script that takes a YouTube URL (or a local video file), transcribes it locally with Whisper, and uses an LLM to return a structured JSON with a core thesis, key concepts, caveats, open questions, and a clear "is this worth watching in full?" decision. The input can be any video (tech, business, culture, education) — the analysis is framed for IT professionals (devs, QA, architects, SREs, technical PMs) reading critically.
 
 **Runs local-first with [Ollama](https://ollama.com) — no cloud, no API keys, no external services.** If you want a bigger model for harder content, you can optionally swap in **OpenRouter** or **HuggingFace** with a single flag. Transcription always stays local.
 
@@ -62,7 +62,7 @@ python -m web.server
 open http://localhost:8765
 ```
 
-You get a provider selector (Ollama / OpenRouter / HuggingFace), a settings drawer to paste API keys (stored in `localStorage`, never on the server), and a result view with decision card, key concepts, risks and questions. Full details in [`web/README.md`](web/README.md).
+You get a provider selector (Ollama / OpenRouter / HuggingFace), a settings drawer to paste API keys (stored in `localStorage`, never on the server), a click-to-pick file uploader for local videos, and a result view with decision, summary, core thesis, key concepts, caveats, open questions, actionable takeaways and notable quotes. Full details in [`web/README.md`](web/README.md).
 
 ### Optional: use a cloud model instead of Ollama
 
@@ -104,19 +104,31 @@ A validated JSON object with this shape (full schema in [`SPEC.md`](SPEC.md)):
 
 ```json
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
+  "source": {...},
   "decision": {
     "watch_full": true,
     "confidence": "high",
     "rationale": "Short, dense, with real code examples. Worth the 8 minutes."
   },
+  "summary": "One paragraph that gives the shape of the video before the details.",
+  "core_thesis": "The one idea a viewer should walk away with (fits in a tweet).",
   "key_concepts": [...],
-  "architectural_risks": [...],
+  "caveats": [...],
   "open_questions": [...],
-  "actionable_items": [...],
+  "actionable_takeaways": [...],
+  "notable_quotes": [...],
   "metadata": {...}
 }
 ```
+
+Each field is driven by a **reading lens**:
+
+- `summary` + `notable_quotes` → *give the shape of the content before the detail*
+- `core_thesis` → *separate the thesis from the illustrations that support it*
+- `caveats` → *what was not said or not backed by evidence*
+- `open_questions` → *what the video leaves open for further inquiry*
+- `actionable_takeaways` → *what a reader can apply or share without re-watching*
 
 A **structured insight** is the result of forcing an LLM to answer inside a predefined schema instead of free prose. It is the smallest unit that lets you make a decision about a piece of content without consuming the content end-to-end.
 

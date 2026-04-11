@@ -22,6 +22,7 @@ import os
 import re
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NoReturn
@@ -32,6 +33,7 @@ from .llm import (
     PROVIDERS,
     call_llm,
 )
+from .prompts import build_prompt
 from .schema import Insight
 from .transcribe import transcribe
 
@@ -81,14 +83,14 @@ def get_video_duration_seconds(file_path: str) -> int:
         raise RuntimeError(f"[extract] error getting duration: {e}")
 
 
-def download_youtube_audio(url: str) -> str:
+def download_youtube_audio(url: str) -> tuple[str, str | None]:
     """Download audio from YouTube using yt-dlp.
 
     Args:
         url: YouTube URL
 
     Returns:
-        Path to downloaded audio file (.wav)
+        (audio_file_path, video_title_or_None)
 
     Raises:
         RuntimeError: If download fails
@@ -96,13 +98,14 @@ def download_youtube_audio(url: str) -> str:
     try:
         import subprocess
 
-        output_template = "downloads/%(title)s-%(id)s.%(ext)s"
-        Path("downloads").mkdir(exist_ok=True)
+        # Diretorio isolado por execucao — evita glob pegar arquivos de runs anteriores
+        download_dir = Path("downloads") / uuid.uuid4().hex[:8]
+        download_dir.mkdir(parents=True, exist_ok=True)
+        output_template = str(download_dir / "%(title)s-%(id)s.%(ext)s")
 
         # Run yt-dlp as a Python module instead of the `yt-dlp` binary.
         # This way the current interpreter's site-packages is used, so it works
-        # even when the venv is active but not exported via PATH (e.g. when the
-        # web server is launched with `.venv/bin/python -m web.server`).
+        # even when the venv is active but not exported via PATH.
         cmd = [
             sys.executable,
             "-m",
@@ -117,11 +120,10 @@ def download_youtube_audio(url: str) -> str:
             url,
         ]
 
-        print(f"[extract] downloading audio from YouTube...")
+        print("[extract] downloading audio from YouTube...")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
 
         if result.returncode != 0:
-            # Distinguish "module not installed" from actual download failures
             stderr = (result.stderr or "").strip()
             if "No module named" in stderr and "yt_dlp" in stderr:
                 raise RuntimeError(
@@ -130,9 +132,14 @@ def download_youtube_audio(url: str) -> str:
                 )
             raise RuntimeError(f"[yt-dlp] error: {stderr}")
 
-        # Encontrar arquivo baixado
-        for wav_file in Path("downloads").glob("*.wav"):
-            return str(wav_file)
+        # Encontrar arquivo baixado e extrair titulo do nome
+        for wav_file in download_dir.glob("*.wav"):
+            # Template: %(title)s-%(id)s.%(ext)s → parsear titulo
+            filename = wav_file.stem  # "Title Here-VIDEO_ID"
+            # Video ID do YouTube: 11 chars no final apos ultimo "-"
+            parts = filename.rsplit("-", 1)
+            title = parts[0] if len(parts) == 2 else filename
+            return str(wav_file), title
 
         raise RuntimeError("[yt-dlp] error: no audio file found after download")
 
@@ -157,21 +164,18 @@ def validate_url(url: str) -> bool:
     return any(re.match(pattern, url) for pattern in youtube_patterns)
 
 
-def validate_input(input_path: str) -> tuple[str, str, int]:
-    """Validate and identify input type. Returns type, file_path, duration_seconds.
+def validate_input(input_path: str) -> tuple[str, str, int, str | None]:
+    """Validate and identify input type.
 
     Args:
         input_path: YouTube URL or file path
 
     Returns:
-        (type, file_path, duration_seconds) where type is 'youtube', 'local_video', or 'local_audio'
+        (type, file_path, duration_seconds, title_or_None)
 
     Raises:
         ValueError: With a human-readable message if the input is invalid.
-                    The CLI catches this and converts it to sys.exit(EXIT_INVALID_INPUT)
-                    in main(); the web server surfaces the message in the HTTP response.
     """
-    # Check if URL
     if input_path.startswith("http"):
         if not validate_url(input_path):
             raise ValueError(
@@ -179,18 +183,16 @@ def validate_input(input_path: str) -> tuple[str, str, int]:
                 "Expected: https://www.youtube.com/watch?v=XXX or https://youtu.be/XXX"
             )
         try:
-            audio_path = download_youtube_audio(input_path)
+            audio_path, title = download_youtube_audio(input_path)
             duration = get_video_duration_seconds(audio_path)
-            return "youtube", audio_path, duration
+            return "youtube", audio_path, duration, title
         except RuntimeError as e:
             raise ValueError(str(e)) from e
 
-    # Check if local file
     file_path = Path(input_path)
     if not file_path.exists():
         raise ValueError(f"[extract] error: file not found: {input_path}")
 
-    # Determine file type
     audio_extensions = {".wav", ".mp3", ".m4a", ".flac"}
     video_extensions = {".mp4", ".mkv", ".webm", ".mov", ".avi"}
 
@@ -204,98 +206,18 @@ def validate_input(input_path: str) -> tuple[str, str, int]:
             f"Supported: {audio_extensions | video_extensions}"
         )
 
-    # Get duration
     try:
         duration = get_video_duration_seconds(input_path)
     except RuntimeError as e:
         raise ValueError(str(e)) from e
 
-    return input_type, input_path, duration
+    return input_type, input_path, duration, None
 
 
 def error_exit(message: str, code: int) -> NoReturn:
-    """Print error message and exit with code.
-
-    Args:
-        message: Error message
-        code: Exit code
-    """
+    """Print error message and exit with code."""
     print(message, file=sys.stderr)
     sys.exit(code)
-
-
-def build_prompt(transcript: str) -> str:
-    """Build sandwich-technique prompt with transcript and schema.
-
-    Estrutura sandwich:
-    1. System prompt (quem você é, restrições)
-    2. Contexto (transcrição)
-    3. Instrução final + schema JSON
-
-    Args:
-        transcript: Full transcription text
-
-    Returns:
-        Complete prompt ready for LLM
-    """
-    schema_example = Insight.model_json_schema()
-
-    prompt = f"""Você é um assistente técnico especializado em extrair insights estruturados
-de conteúdo educacional e técnico. Você responde SEMPRE em português
-brasileiro, é técnico e preciso, e usa terminologia correta da área quando
-identificada. Você SEMPRE devolve um único bloco JSON válido, sem texto
-antes ou depois. Você nunca inventa informação que não está na transcrição.
-Quando não tiver evidência suficiente para um campo, deixe a lista vazia
-ou marque a confiança como "low".
-
-[TRANSCRIPTION]
-{transcript}
-
-[INSTRUCTION]
-Analise a transcrição acima e extraia insights estruturados. Devolva um JSON
-que valida contra este schema EXATO:
-
-{{
-  "schema_version": "1.0.0",
-  "source": {{
-    "type": "<youtube|local_video|local_audio>",
-    "url_or_path": "<input source>",
-    "title": "<title or null>",
-    "duration_seconds": <int>
-  }},
-  "decision": {{
-    "watch_full": <true|false>,
-    "confidence": "<low|medium|high>",
-    "rationale": "<max 280 chars — cabe num tweet>"
-  }},
-  "key_concepts": [
-    {{"name": "<max 60 chars>", "explanation": "<max 240 chars>", "timestamp_seconds": <int|null>}},
-    ...
-  ],
-  "architectural_risks": ["<string>", ...],
-  "open_questions": ["<string>", ...],
-  "actionable_items": ["<string>", ...],
-  "metadata": {{
-    "extracted_at": "<ISO datetime>",
-    "transcription_model": "whisper-base",
-    "llm_model": "qwen2.5:7b",
-    "transcription_duration_seconds": <float>,
-    "llm_duration_seconds": <float>,
-    "language_detected": "<iso 639-1 code>"
-  }}
-}}
-
-CRITICAL RULES:
-- key_concepts: MUST have 3-5 items. Less than 3 = trivial content. More than 5 = you're summarizing, not extracting.
-- open_questions: ALWAYS at least 1. Good QA always finds something to question.
-- architectural_risks: Can be empty if content is not technical. Max 5 items.
-- actionable_items: Can be empty if content is not executable. Max 7 items.
-- confidence: low = you're not sure. medium = reasonable doubt. high = clear pattern in transcript.
-- rationale: MUST fit in 280 characters. If longer, you're over-explaining.
-
-Return ONLY the JSON object. No markdown, no code blocks, no explanation."""
-
-    return prompt
 
 
 def extract(
@@ -304,6 +226,7 @@ def extract(
     model: str | None = None,
     provider: str = "ollama",
     api_key: str | None = None,
+    whisper_model: str = "small",
 ) -> int:
     """Main extraction pipeline.
 
@@ -313,50 +236,54 @@ def extract(
         model: LLM model name (provider-specific). If None, uses provider default.
         provider: 'ollama' (local), 'openrouter', or 'huggingface'
         api_key: API key for cloud providers (required if not ollama)
+        whisper_model: Whisper model size (default: small)
 
     Returns:
         Exit code
     """
     # 1. Validate input
-    print(f"[extract] validating input...")
+    print("[extract] validating input...")
     try:
-        input_type, file_path, duration = validate_input(input_path)
+        input_type, file_path, duration, title = validate_input(input_path)
     except ValueError as e:
         error_exit(str(e), EXIT_INVALID_INPUT)
 
     print(f"[extract] duration: {duration}s ({duration // 60}m {duration % 60}s)")
 
-    # Check duration limits (SPEC.md)
-    if duration > 180 * 60:  # 180 minutes
+    if duration > 180 * 60:
         error_exit(
-            f"[extract] error: video too long ({duration // 60}m). "
-            f"Limit is 180 minutes.",
+            f"[extract] error: video too long ({duration // 60}m). Limit is 180 minutes.",
             EXIT_VIDEO_TOO_LONG,
         )
-    elif duration > 60 * 60:  # 60 minutes
+    elif duration > 60 * 60:
         print(f"[extract] warning: video is long ({duration // 60}m). Processing anyway.")
 
-    # 2. Transcribe
-    print(f"[extract] transcribing...")
+    # 2. Transcribe — retorna TranscriptionResult com text, segments, language
+    print(f"[extract] transcribing with whisper-{whisper_model}...")
     transcribe_start = time.time()
     try:
-        transcript = transcribe(file_path, model_name="base")
+        transcription = transcribe(file_path, model_name=whisper_model)
     except RuntimeError as e:
         error_exit(str(e), EXIT_TRANSCRIBE_ERROR)
     transcribe_duration = time.time() - transcribe_start
 
-    if not transcript:
-        error_exit(
-            "[extract] error: no audio detected in file",
-            EXIT_TRANSCRIBE_ERROR,
-        )
+    if not transcription.text:
+        error_exit("[extract] error: no audio detected in file", EXIT_TRANSCRIBE_ERROR)
 
-    print(f"[extract] transcribed {len(transcript)} chars in {transcribe_duration:.1f}s")
+    print(f"[extract] transcribed {len(transcription.text)} chars in {transcribe_duration:.1f}s")
 
-    # 3. Build prompt (sandwich technique)
-    prompt = build_prompt(transcript)
+    # 3. Build prompt com metadata + segments (sandwich technique)
+    prompt = build_prompt(
+        transcription.text,
+        source_type=input_type,
+        source_url_or_path=input_path,
+        source_title=title,
+        duration_seconds=duration,
+        language_detected=transcription.language,
+        segments=transcription.segments,
+    )
 
-    # 4. Call LLM (dispatches to ollama/openrouter/huggingface)
+    # 4. Call LLM
     effective_model = model or PROVIDERS[provider]["default_model"]
     print(f"[extract] extracting insights via {provider} ({effective_model})...")
     llm_start = time.time()
@@ -374,11 +301,19 @@ def extract(
         error_exit(str(e), EXIT_LLM_VALIDATION_ERROR)
     llm_duration = time.time() - llm_start
 
-    # 5. Update metadata with real values
+    # 5. Inject source + metadata com valores reais (nao confiar no LLM para isso)
+    insight.source.type = input_type
+    insight.source.url_or_path = input_path
+    insight.source.duration_seconds = duration
+    if title:
+        insight.source.title = title
+
     insight.metadata.transcription_duration_seconds = transcribe_duration
     insight.metadata.llm_duration_seconds = llm_duration
     insight.metadata.llm_model = f"{provider}:{effective_model}"
     insight.metadata.extracted_at = datetime.now(timezone.utc)
+    insight.metadata.language_detected = transcription.language
+    insight.metadata.transcription_model = f"whisper-{whisper_model}"
 
     # 6. Output
     output_json = json.loads(insight.model_dump_json(by_alias=False, exclude_none=True))
@@ -388,7 +323,7 @@ def extract(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w") as f:
             json.dump(output_json, f, indent=2, ensure_ascii=False)
-        print(f"[extract] ✓ written to {output_file}")
+        print(f"[extract] written to {output_file}")
     else:
         print(json.dumps(output_json, indent=2, ensure_ascii=False))
 
@@ -418,32 +353,34 @@ def main() -> None:
         "input", help="YouTube URL (https://www.youtube.com/watch?v=...) or file path"
     )
     parser.add_argument(
-        "--output",
-        "-o",
+        "--output", "-o",
         help="Output JSON file path (default: stdout)",
         default=None,
     )
     parser.add_argument(
-        "--provider",
-        "-p",
-        help="LLM provider: 'ollama' (local), 'openrouter', or 'huggingface' (default: ollama)",
+        "--provider", "-p",
+        help="LLM provider (default: ollama)",
         choices=list(PROVIDERS.keys()),
         default="ollama",
     )
     parser.add_argument(
-        "--model",
-        "-m",
+        "--model", "-m",
         help="Model name (provider-specific). If omitted, uses the provider's default.",
         default=None,
     )
     parser.add_argument(
-        "--api-key",
-        "-k",
+        "--api-key", "-k",
         help=(
             "API key for cloud providers. If omitted, reads from env var: "
             "OPENROUTER_API_KEY or HUGGINGFACE_API_KEY."
         ),
         default=None,
+    )
+    parser.add_argument(
+        "--whisper-model",
+        help="Whisper model size (default: small). Options: tiny, base, small, medium, large",
+        choices=["tiny", "base", "small", "medium", "large"],
+        default="small",
     )
 
     args = parser.parse_args()
@@ -473,6 +410,7 @@ def main() -> None:
             model=args.model,
             provider=args.provider,
             api_key=api_key,
+            whisper_model=args.whisper_model,
         )
         sys.exit(exit_code)
     except KeyboardInterrupt:

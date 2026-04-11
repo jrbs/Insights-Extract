@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Insights Extract — Turn YouTube videos into structured insights</title>
-  <meta name="description" content="Local-first tool that transcribes YouTube videos with Whisper and extracts structured insights using a local LLM. No API keys. No cloud.">
+  <title>Insights Extract — Transforme vídeos do YouTube em insights estruturados</title>
+  <meta name="description" content="Ferramenta local-first que transcreve vídeos do YouTube com Whisper e extrai insights estruturados usando um LLM local. Sem chave de API. Sem nuvem.">
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <link rel="stylesheet" type="text/css" href="https://unpkg.com/@phosphor-icons/web@2.0.3/src/regular/style.css" />
@@ -82,7 +82,7 @@
         </div>
         <div>
           <h1 class="text-stone-100 font-semibold tracking-tight">Insights Extract</h1>
-          <p class="text-stone-500 text-xs">Local-first • Zero API keys • Schema-contracted</p>
+          <p class="text-stone-500 text-xs">Local-first • Zero chave de API • Contrato de schema</p>
         </div>
       </div>
       <div class="flex items-center gap-3">
@@ -114,7 +114,7 @@
       <div class="flex items-center justify-between mb-6">
         <div class="flex items-center gap-2">
           <i class="ph-fill ph-gear text-fuchsia-400 text-xl"></i>
-          <h2 class="text-stone-100 font-semibold text-lg">Settings</h2>
+          <h2 class="text-stone-100 font-semibold text-lg">Configurações</h2>
         </div>
         <button @click="showSettings = false" class="text-stone-500 hover:text-stone-200">
           <i class="ph ph-x text-xl"></i>
@@ -123,7 +123,7 @@
 
       <!-- Provider selector -->
       <div class="mb-6">
-        <label class="text-stone-400 text-xs font-semibold uppercase tracking-wider mb-3 block">LLM provider</label>
+        <label class="text-stone-400 text-xs font-semibold uppercase tracking-wider mb-3 block">Provider do LLM</label>
         <div class="space-y-2">
           <template x-for="p in providerList" :key="p.id">
             <button
@@ -137,7 +137,7 @@
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2">
                   <p class="text-stone-200 font-medium text-sm" x-text="p.name"></p>
-                  <span x-show="p.free" class="text-[10px] uppercase tracking-wider bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">free tier</span>
+                  <span x-show="p.free" class="text-[10px] uppercase tracking-wider bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">grátis</span>
                   <span x-show="p.local" class="text-[10px] uppercase tracking-wider bg-sky-500/20 text-sky-400 px-1.5 py-0.5 rounded">local</span>
                 </div>
                 <p class="text-stone-500 text-xs mt-0.5" x-text="p.description"></p>
@@ -151,7 +151,7 @@
       <!-- API Key (only for cloud providers) -->
       <div x-show="provider !== 'ollama'" class="mb-6 slide-in">
         <label class="text-stone-400 text-xs font-semibold uppercase tracking-wider mb-3 block">
-          <span x-text="providerLabel(provider) + ' API key'"></span>
+          <span x-text="'chave de API do ' + providerLabel(provider)"></span>
         </label>
         <div class="relative">
           <input
@@ -167,25 +167,48 @@
           </button>
         </div>
 
-        <!-- Where to get the key -->
+        <!-- Where to get the key — token type + step-by-step -->
         <div class="mt-3 p-3 bg-stone-900/30 border border-stone-800 rounded-lg text-xs">
+          <!-- Token type badge -->
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-stone-500 uppercase tracking-wider text-[10px]">Tipo do token:</span>
+            <span class="text-emerald-400 font-semibold" x-text="keyGuide(provider).type"></span>
+          </div>
+
+          <!-- Link to the settings page -->
           <p class="text-stone-400 mb-1 flex items-center gap-2">
-            <i class="ph ph-info"></i>
-            Where to get it:
+            <i class="ph ph-link"></i>
+            Gere aqui:
           </p>
-          <a :href="keyUrl(provider)" target="_blank" class="text-fuchsia-400 hover:text-fuchsia-300 underline break-all mono" x-text="keyUrl(provider)"></a>
-          <p class="text-stone-500 mt-2 text-[11px]" x-text="keyHint(provider)"></p>
+          <a :href="keyUrl(provider)" target="_blank" class="text-fuchsia-400 hover:text-fuchsia-300 underline break-all mono text-[11px]" x-text="keyUrl(provider)"></a>
+
+          <!-- Step-by-step -->
+          <p class="text-stone-400 mt-3 mb-1 flex items-center gap-2">
+            <i class="ph ph-list-numbers"></i>
+            Passos:
+          </p>
+          <ol class="text-stone-500 text-[11px] space-y-1 list-decimal list-inside">
+            <template x-for="(step, idx) in keyGuide(provider).steps" :key="idx">
+              <li x-html="step"></li>
+            </template>
+          </ol>
+
+          <!-- Extra note (pricing, alternative, etc) -->
+          <p x-show="keyGuide(provider).note" class="text-stone-500 mt-3 text-[11px] italic flex items-start gap-1.5">
+            <i class="ph ph-info text-stone-600 mt-0.5"></i>
+            <span x-text="keyGuide(provider).note"></span>
+          </p>
         </div>
 
         <p class="text-stone-600 text-[11px] mt-3 flex items-start gap-2">
           <i class="ph ph-shield-check text-emerald-500 text-sm flex-shrink-0 mt-0.5"></i>
-          Your key is stored in <span class="mono text-stone-500">localStorage</span> of this browser only. It is sent to the backend per-request and never persisted server-side.
+          Sua chave fica no <span class="mono text-stone-500">localStorage</span> deste navegador. É enviada ao backend só na requisição e nunca é persistida no servidor.
         </p>
       </div>
 
       <!-- Model selector per provider -->
       <div class="mb-6">
-        <label class="text-stone-400 text-xs font-semibold uppercase tracking-wider mb-3 block">Model</label>
+        <label class="text-stone-400 text-xs font-semibold uppercase tracking-wider mb-3 block">Modelo</label>
         <select
           x-model="models[provider]"
           @change="saveSettings()"
@@ -201,19 +224,19 @@
       <div x-show="provider === 'ollama'" class="p-3 bg-stone-900/30 border border-stone-800 rounded-lg text-xs mb-6 slide-in">
         <p class="text-stone-400 mb-2 flex items-center gap-2">
           <i class="ph ph-terminal"></i>
-          Make sure Ollama is running locally:
+          Garanta que o Ollama está rodando localmente:
         </p>
         <pre class="bg-stone-950 p-2 rounded mono text-stone-300 text-[11px] overflow-x-auto">ollama serve
 ollama pull qwen2.5:7b</pre>
         <p class="text-stone-500 mt-2">
-          Don't have it? Install from
+          Não tem? Instale em
           <a href="https://ollama.com" target="_blank" class="text-fuchsia-400 hover:underline">ollama.com</a>
         </p>
       </div>
 
       <div class="text-center">
         <button @click="showSettings = false" class="btn-primary px-6 py-2 rounded-lg text-white font-medium text-sm">
-          Done
+          Pronto
         </button>
       </div>
     </div>
@@ -225,10 +248,10 @@ ollama pull qwen2.5:7b</pre>
     <!-- Hero -->
     <div class="text-center mb-12 slide-in">
       <h2 class="text-4xl md:text-5xl font-bold text-stone-100 tracking-tight mb-4">
-        Turn videos into <span class="bg-gradient-to-r from-fuchsia-400 to-purple-400 bg-clip-text text-transparent">structured decisions</span>
+        Transforme vídeos em <span class="bg-gradient-to-r from-fuchsia-400 to-purple-400 bg-clip-text text-transparent">decisões estruturadas</span>
       </h2>
       <p class="text-stone-400 max-w-2xl mx-auto text-lg">
-        Paste a YouTube URL. Get back a JSON with a clear <span class="text-fuchsia-400">watch it or skip it</span> decision, key concepts, risks, and questions.
+        Cole uma URL do YouTube ou envie um arquivo local. Receba um JSON com a decisão <span class="text-fuchsia-400">assistir ou pular</span>, a tese central, conceitos-chave, ressalvas e perguntas em aberto.
       </p>
     </div>
 
@@ -242,21 +265,21 @@ ollama pull qwen2.5:7b</pre>
           class="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors"
           :class="inputMode === 'url' ? 'tab-active' : 'border-stone-800 text-stone-400 hover:text-stone-200'">
           <i class="ph ph-youtube-logo"></i>
-          YouTube URL
+          URL do YouTube
         </button>
         <button
           @click="inputMode = 'file'"
           class="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors"
           :class="inputMode === 'file' ? 'tab-active' : 'border-stone-800 text-stone-400 hover:text-stone-200'">
           <i class="ph ph-file-video"></i>
-          Local file
+          Arquivo local
         </button>
       </div>
 
       <!-- URL Input -->
       <div x-show="inputMode === 'url'" class="space-y-4">
         <label class="block">
-          <span class="text-stone-400 text-sm mb-2 block">YouTube URL</span>
+          <span class="text-stone-400 text-sm mb-2 block">URL do YouTube</span>
           <input
             type="url"
             x-model="url"
@@ -266,20 +289,52 @@ ollama pull qwen2.5:7b</pre>
         </label>
       </div>
 
-      <!-- File Input -->
+      <!-- File Input (real file picker, uploads to backend) -->
       <div x-show="inputMode === 'file'" class="space-y-4">
-        <label class="block">
-          <span class="text-stone-400 text-sm mb-2 block">Local file path</span>
-          <input
-            type="text"
-            x-model="filePath"
-            placeholder="/path/to/video.mp4 or /path/to/audio.wav"
-            class="w-full bg-stone-900/50 border border-stone-800 rounded-lg px-4 py-3 text-stone-100 placeholder-stone-600 focus:outline-none focus:border-fuchsia-500 transition-colors mono text-sm"
-            @keyup.enter="submit()">
-        </label>
+        <span class="text-stone-400 text-sm mb-2 block">Arquivo de vídeo ou áudio</span>
+
+        <!-- Hidden native input — triggered by the dropzone button below -->
+        <input
+          type="file"
+          class="hidden"
+          x-ref="fileInput"
+          @change="onFilePicked($event)"
+          accept="video/*,audio/*,.mp4,.mkv,.webm,.mov,.avi,.wav,.mp3,.m4a,.flac">
+
+        <!-- Dropzone: empty state -->
+        <button
+          x-show="!file"
+          type="button"
+          @click="$refs.fileInput.click()"
+          class="w-full border-2 border-dashed border-stone-800 hover:border-fuchsia-500/50 rounded-lg px-4 py-8 text-center transition-colors group">
+          <div class="flex flex-col items-center gap-2">
+            <i class="ph ph-upload-simple text-3xl text-stone-600 group-hover:text-fuchsia-400 transition-colors"></i>
+            <p class="text-stone-300 font-medium text-sm">Clique para escolher um arquivo de vídeo ou áudio</p>
+            <p class="text-stone-600 text-xs">O arquivo é enviado ao backend local — nada sai da sua máquina.</p>
+          </div>
+        </button>
+
+        <!-- Dropzone: populated state -->
+        <button
+          x-show="file"
+          type="button"
+          @click="$refs.fileInput.click()"
+          class="w-full border border-fuchsia-500/40 bg-fuchsia-500/5 rounded-lg px-4 py-4 text-left transition-colors hover:bg-fuchsia-500/10">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-fuchsia-500/20 flex items-center justify-center flex-shrink-0">
+              <i class="ph-fill ph-file-video text-fuchsia-400 text-xl"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-stone-200 font-medium text-sm truncate mono" x-text="file?.name"></p>
+              <p class="text-stone-500 text-xs" x-text="file ? formatSize(file.size) + ' · clique para trocar' : ''"></p>
+            </div>
+            <i class="ph ph-check-circle-fill text-emerald-400 text-xl flex-shrink-0"></i>
+          </div>
+        </button>
+
         <p class="text-stone-500 text-xs flex items-center gap-2">
           <i class="ph ph-info"></i>
-          Supported: .mp4, .mkv, .webm, .mov, .avi, .wav, .mp3, .m4a, .flac
+          Suportado: .mp4, .mkv, .webm, .mov, .avi, .wav, .mp3, .m4a, .flac · máx 500 MB
         </p>
       </div>
 
@@ -290,11 +345,11 @@ ollama pull qwen2.5:7b</pre>
         </div>
         <div class="flex-1 min-w-0">
           <p class="text-stone-300 text-xs font-medium" x-text="providerLabel(provider)"></p>
-          <p class="text-stone-500 text-[11px] mono truncate" x-text="models[provider] || 'no model selected'"></p>
+          <p class="text-stone-500 text-[11px] mono truncate" x-text="models[provider] || 'nenhum modelo selecionado'"></p>
         </div>
         <button @click="showSettings = true" class="text-stone-500 hover:text-stone-200 text-xs flex items-center gap-1">
           <i class="ph ph-gear"></i>
-          change
+          trocar
         </button>
       </div>
 
@@ -303,8 +358,8 @@ ollama pull qwen2.5:7b</pre>
         class="mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs flex items-start gap-2">
         <i class="ph ph-warning text-amber-400 text-lg flex-shrink-0"></i>
         <div>
-          <p class="text-amber-200 font-medium" x-text="providerLabel(provider) + ' requires an API key'"></p>
-          <button @click="showSettings = true" class="text-amber-400 hover:text-amber-300 underline mt-1">Configure now</button>
+          <p class="text-amber-200 font-medium" x-text="providerLabel(provider) + ' precisa de chave de API'"></p>
+          <button @click="showSettings = true" class="text-amber-400 hover:text-amber-300 underline mt-1">Configurar agora</button>
         </div>
       </div>
 
@@ -314,7 +369,7 @@ ollama pull qwen2.5:7b</pre>
         :disabled="!canSubmit()"
         class="btn-primary w-full mt-6 py-3 rounded-lg text-white font-semibold flex items-center justify-center gap-2">
         <i class="ph-fill ph-sparkle"></i>
-        Extract insights
+        Extrair insights
       </button>
     </div>
 
@@ -353,10 +408,10 @@ ollama pull qwen2.5:7b</pre>
           <i class="ph ph-warning text-red-400 text-xl"></i>
         </div>
         <div class="flex-1">
-          <h3 class="text-red-300 font-semibold mb-1">Extraction failed</h3>
+          <h3 class="text-red-300 font-semibold mb-1">Falha na extração</h3>
           <p class="text-red-200/80 text-sm mono" x-text="error"></p>
           <button @click="reset()" class="mt-3 text-xs text-stone-400 hover:text-stone-100 underline">
-            try again
+            tentar de novo
           </button>
         </div>
       </div>
@@ -375,14 +430,14 @@ ollama pull qwen2.5:7b</pre>
           </div>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-3 mb-2">
-              <h3 class="text-stone-100 text-xl font-bold" x-text="result?.decision?.watch_full ? 'Watch it' : 'Skip it (or skim)'"></h3>
+              <h3 class="text-stone-100 text-xl font-bold" x-text="result?.decision?.watch_full ? 'Vale assistir' : 'Pula (ou só passa o olho)'"></h3>
               <span class="px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider"
                 :class="{
                   'bg-emerald-500/20 text-emerald-400': result?.decision?.confidence === 'high',
                   'bg-amber-500/20 text-amber-400': result?.decision?.confidence === 'medium',
                   'bg-stone-500/20 text-stone-400': result?.decision?.confidence === 'low'
                 }"
-                x-text="result?.decision?.confidence + ' confidence'"></span>
+                x-text="confidenceLabel(result?.decision?.confidence)"></span>
             </div>
             <p class="text-stone-300 leading-relaxed" x-text="result?.decision?.rationale"></p>
           </div>
@@ -398,14 +453,34 @@ ollama pull qwen2.5:7b</pre>
         </div>
       </div>
 
-      <!-- Two-column grid for concepts and risks -->
+      <!-- Core Thesis (the one-sentence point) -->
+      <div x-show="result?.core_thesis" class="glass rounded-2xl p-6 gradient-border">
+        <div class="flex items-center gap-2 mb-3">
+          <i class="ph-fill ph-target text-fuchsia-400 text-xl"></i>
+          <h3 class="text-stone-100 font-semibold">Tese central</h3>
+          <span class="text-stone-600 text-[11px] uppercase tracking-wider">a ideia em 1 frase</span>
+        </div>
+        <p class="text-stone-200 text-lg leading-relaxed italic" x-text="result?.core_thesis"></p>
+      </div>
+
+      <!-- Summary (1-paragraph shape of the video) -->
+      <div x-show="result?.summary" class="glass rounded-2xl p-6">
+        <div class="flex items-center gap-2 mb-3">
+          <i class="ph-fill ph-article text-sky-400 text-xl"></i>
+          <h3 class="text-stone-100 font-semibold">Resumo</h3>
+          <span class="text-stone-600 text-[11px] uppercase tracking-wider">a forma do conteúdo</span>
+        </div>
+        <p class="text-stone-300 leading-relaxed" x-text="result?.summary"></p>
+      </div>
+
+      <!-- Two-column grid for concepts and caveats -->
       <div class="grid md:grid-cols-2 gap-6">
 
         <!-- Key Concepts -->
         <div class="glass rounded-2xl p-6">
           <div class="flex items-center gap-2 mb-4">
             <i class="ph-fill ph-brain text-fuchsia-400 text-xl"></i>
-            <h3 class="text-stone-100 font-semibold">Key concepts</h3>
+            <h3 class="text-stone-100 font-semibold">Conceitos-chave</h3>
             <span class="text-stone-600 text-xs mono" x-text="'(' + (result?.key_concepts?.length || 0) + ')'"></span>
           </div>
           <div class="space-y-4">
@@ -421,21 +496,21 @@ ollama pull qwen2.5:7b</pre>
           </div>
         </div>
 
-        <!-- Architectural Risks -->
+        <!-- Caveats (blind spots, assumptions, claims not supported) -->
         <div class="glass rounded-2xl p-6">
           <div class="flex items-center gap-2 mb-4">
             <i class="ph-fill ph-warning-circle text-amber-400 text-xl"></i>
-            <h3 class="text-stone-100 font-semibold">Architectural risks</h3>
-            <span class="text-stone-600 text-xs mono" x-text="'(' + (result?.architectural_risks?.length || 0) + ')'"></span>
+            <h3 class="text-stone-100 font-semibold">Ressalvas</h3>
+            <span class="text-stone-600 text-xs mono" x-text="'(' + (result?.caveats?.length || 0) + ')'"></span>
           </div>
-          <div x-show="(result?.architectural_risks?.length || 0) === 0" class="text-stone-600 text-sm italic">
-            No architectural risks identified.
+          <div x-show="(result?.caveats?.length || 0) === 0" class="text-stone-600 text-sm italic">
+            Sem ressalvas — o conteúdo parece bem fundamentado.
           </div>
           <ul class="space-y-3">
-            <template x-for="risk in result?.architectural_risks || []">
+            <template x-for="caveat in result?.caveats || []">
               <li class="flex items-start gap-2 text-sm">
                 <i class="ph ph-caret-right text-amber-400 mt-0.5 flex-shrink-0"></i>
-                <span class="text-stone-300 leading-relaxed" x-text="risk"></span>
+                <span class="text-stone-300 leading-relaxed" x-text="caveat"></span>
               </li>
             </template>
           </ul>
@@ -445,7 +520,7 @@ ollama pull qwen2.5:7b</pre>
         <div class="glass rounded-2xl p-6">
           <div class="flex items-center gap-2 mb-4">
             <i class="ph-fill ph-question text-sky-400 text-xl"></i>
-            <h3 class="text-stone-100 font-semibold">Open questions</h3>
+            <h3 class="text-stone-100 font-semibold">Perguntas em aberto</h3>
             <span class="text-stone-600 text-xs mono" x-text="'(' + (result?.open_questions?.length || 0) + ')'"></span>
           </div>
           <ul class="space-y-3">
@@ -458,18 +533,18 @@ ollama pull qwen2.5:7b</pre>
           </ul>
         </div>
 
-        <!-- Actionable Items -->
+        <!-- Actionable Takeaways -->
         <div class="glass rounded-2xl p-6">
           <div class="flex items-center gap-2 mb-4">
             <i class="ph-fill ph-check-square text-emerald-400 text-xl"></i>
-            <h3 class="text-stone-100 font-semibold">Actionable items</h3>
-            <span class="text-stone-600 text-xs mono" x-text="'(' + (result?.actionable_items?.length || 0) + ')'"></span>
+            <h3 class="text-stone-100 font-semibold">Ações práticas</h3>
+            <span class="text-stone-600 text-xs mono" x-text="'(' + (result?.actionable_takeaways?.length || 0) + ')'"></span>
           </div>
-          <div x-show="(result?.actionable_items?.length || 0) === 0" class="text-stone-600 text-sm italic">
-            No actionable items. Content is purely informational.
+          <div x-show="(result?.actionable_takeaways?.length || 0) === 0" class="text-stone-600 text-sm italic">
+            Sem ações práticas. O conteúdo é puramente conceitual.
           </div>
           <ul class="space-y-3">
-            <template x-for="(item, idx) in result?.actionable_items || []" :key="idx">
+            <template x-for="(item, idx) in result?.actionable_takeaways || []" :key="idx">
               <li class="flex items-start gap-2 text-sm">
                 <div class="w-4 h-4 rounded border border-stone-700 mt-0.5 flex-shrink-0"></div>
                 <span class="text-stone-300 leading-relaxed" x-text="item"></span>
@@ -480,15 +555,32 @@ ollama pull qwen2.5:7b</pre>
 
       </div>
 
+      <!-- Notable Quotes (full-width, shows only when present) -->
+      <div x-show="(result?.notable_quotes?.length || 0) > 0" class="glass rounded-2xl p-6">
+        <div class="flex items-center gap-2 mb-4">
+          <i class="ph-fill ph-quotes text-purple-400 text-xl"></i>
+          <h3 class="text-stone-100 font-semibold">Citações marcantes</h3>
+          <span class="text-stone-600 text-xs mono" x-text="'(' + (result?.notable_quotes?.length || 0) + ')'"></span>
+          <span class="text-stone-600 text-[11px] uppercase tracking-wider ml-auto">verbatim · sem parafrasear</span>
+        </div>
+        <div class="space-y-4">
+          <template x-for="(quote, idx) in result?.notable_quotes || []" :key="idx">
+            <blockquote class="border-l-2 border-purple-500/50 pl-4 italic text-stone-300 leading-relaxed text-sm">
+              <span>&ldquo;</span><span x-text="quote"></span><span>&rdquo;</span>
+            </blockquote>
+          </template>
+        </div>
+      </div>
+
       <!-- Metadata Footer -->
       <div class="glass rounded-2xl p-4">
         <div class="flex items-center gap-2 mb-3">
           <i class="ph ph-gear text-stone-500"></i>
-          <h4 class="text-stone-400 text-xs font-semibold uppercase tracking-wider">Metadata</h4>
+          <h4 class="text-stone-400 text-xs font-semibold uppercase tracking-wider">Metadados</h4>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
           <div>
-            <p class="text-stone-600 mb-1">Transcription</p>
+            <p class="text-stone-600 mb-1">Transcrição</p>
             <p class="text-stone-300 mono" x-text="result?.metadata?.transcription_model"></p>
             <p class="text-stone-500 mono" x-text="result?.metadata?.transcription_duration_seconds?.toFixed(1) + 's'"></p>
           </div>
@@ -498,7 +590,7 @@ ollama pull qwen2.5:7b</pre>
             <p class="text-stone-500 mono" x-text="result?.metadata?.llm_duration_seconds?.toFixed(1) + 's'"></p>
           </div>
           <div>
-            <p class="text-stone-600 mb-1">Language</p>
+            <p class="text-stone-600 mb-1">Idioma</p>
             <p class="text-stone-300 mono uppercase" x-text="result?.metadata?.language_detected"></p>
           </div>
           <div>
@@ -512,15 +604,15 @@ ollama pull qwen2.5:7b</pre>
       <div class="flex flex-wrap gap-3">
         <button @click="copyJSON()" class="flex items-center gap-2 px-4 py-2 bg-stone-900/50 hover:bg-stone-800/50 border border-stone-800 rounded-lg text-stone-300 text-sm transition-colors">
           <i class="ph ph-copy"></i>
-          <span x-text="copied ? 'Copied!' : 'Copy JSON'"></span>
+          <span x-text="copied ? 'Copiado!' : 'Copiar JSON'"></span>
         </button>
         <button @click="downloadJSON()" class="flex items-center gap-2 px-4 py-2 bg-stone-900/50 hover:bg-stone-800/50 border border-stone-800 rounded-lg text-stone-300 text-sm transition-colors">
           <i class="ph ph-download-simple"></i>
-          Download JSON
+          Baixar JSON
         </button>
         <button @click="reset()" class="flex items-center gap-2 px-4 py-2 bg-stone-900/50 hover:bg-stone-800/50 border border-stone-800 rounded-lg text-stone-300 text-sm transition-colors ml-auto">
           <i class="ph ph-arrow-counter-clockwise"></i>
-          New extraction
+          Nova extração
         </button>
       </div>
 
@@ -528,7 +620,7 @@ ollama pull qwen2.5:7b</pre>
       <details class="glass rounded-2xl p-4">
         <summary class="cursor-pointer text-stone-400 text-sm hover:text-stone-200 transition-colors flex items-center gap-2">
           <i class="ph ph-code"></i>
-          Raw JSON output
+          JSON bruto
         </summary>
         <pre class="mt-4 p-4 bg-stone-950 rounded-lg overflow-x-auto text-xs text-stone-300 mono" x-text="JSON.stringify(result, null, 2)"></pre>
       </details>
@@ -538,9 +630,9 @@ ollama pull qwen2.5:7b</pre>
     <!-- Footer -->
     <footer class="mt-16 text-center text-stone-600 text-sm">
       <p>
-        <a href="https://github.com/jrbs/Insights-Extract" target="_blank" class="hover:text-stone-400 transition-colors">Open source (MIT)</a>
+        <a href="https://github.com/jrbs/Insights-Extract" target="_blank" class="hover:text-stone-400 transition-colors">Código aberto (MIT)</a>
         ·
-        Build-in-Public episode 01 · Made by
+        Build-in-Public episódio 01 · Feito por
         <a href="https://www.linkedin.com/in/lhfsouza/" target="_blank" class="hover:text-stone-400 transition-colors">Luiz Souza</a>
       </p>
     </footer>
@@ -555,7 +647,7 @@ ollama pull qwen2.5:7b</pre>
       return {
         inputMode: 'url',
         url: '',
-        filePath: '',
+        file: null,            // File object chosen via the picker
         loading: false,
         loadingStage: '',
         loadingHint: '',
@@ -585,7 +677,7 @@ ollama pull qwen2.5:7b</pre>
           {
             id: 'ollama',
             name: 'Ollama (local)',
-            description: 'Run Qwen/Llama/Mistral locally. Zero cost, full privacy, needs Ollama installed.',
+            description: 'Roda Qwen/Llama/Mistral localmente. Zero custo, privacidade total, precisa do Ollama instalado.',
             icon: 'ph-fill ph-desktop',
             local: true,
             free: false,
@@ -593,7 +685,7 @@ ollama pull qwen2.5:7b</pre>
           {
             id: 'openrouter',
             name: 'OpenRouter',
-            description: 'Unified gateway to 300+ models (Claude, GPT, Llama, Gemini). Pay-per-use + free tier.',
+            description: 'Gateway único para 300+ modelos (Claude, GPT, Llama, Gemini). Pay-per-use + tier grátis.',
             icon: 'ph-fill ph-globe',
             local: false,
             free: true,
@@ -601,7 +693,7 @@ ollama pull qwen2.5:7b</pre>
           {
             id: 'huggingface',
             name: 'Hugging Face',
-            description: 'Inference Providers router. Free tier for open models, no vendor lock-in.',
+            description: 'Roteador de Inference Providers. Tier grátis para modelos abertos, sem vendor lock-in.',
             icon: 'ph-fill ph-smiley',
             local: false,
             free: true,
@@ -610,19 +702,19 @@ ollama pull qwen2.5:7b</pre>
 
         modelsByProvider: {
           ollama: [
-            { id: 'qwen2.5:7b', label: 'qwen2.5:7b (default, balanced)' },
-            { id: 'qwen2.5:14b', label: 'qwen2.5:14b (better, slower)' },
-            { id: 'llama3.1:8b', label: 'llama3.1:8b (alternative)' },
-            { id: 'mistral:7b', label: 'mistral:7b (lightweight)' },
+            { id: 'qwen2.5:7b', label: 'qwen2.5:7b (padrão, balanceado)' },
+            { id: 'qwen2.5:14b', label: 'qwen2.5:14b (melhor, mais lento)' },
+            { id: 'llama3.1:8b', label: 'llama3.1:8b (alternativa)' },
+            { id: 'mistral:7b', label: 'mistral:7b (leve)' },
             { id: 'gemma2:9b', label: 'gemma2:9b (Google)' },
           ],
           openrouter: [
-            { id: 'meta-llama/llama-3.1-8b-instruct:free', label: 'Llama 3.1 8B (free)' },
+            { id: 'meta-llama/llama-3.1-8b-instruct:free', label: 'Llama 3.1 8B (grátis)' },
             { id: 'meta-llama/llama-3.1-70b-instruct', label: 'Llama 3.1 70B' },
             { id: 'anthropic/claude-3.5-sonnet', label: 'Claude 3.5 Sonnet' },
-            { id: 'anthropic/claude-3-haiku', label: 'Claude 3 Haiku (fast)' },
+            { id: 'anthropic/claude-3-haiku', label: 'Claude 3 Haiku (rápido)' },
             { id: 'openai/gpt-4o', label: 'GPT-4o' },
-            { id: 'openai/gpt-4o-mini', label: 'GPT-4o mini (fast)' },
+            { id: 'openai/gpt-4o-mini', label: 'GPT-4o mini (rápido)' },
             { id: 'google/gemini-pro-1.5', label: 'Gemini 1.5 Pro' },
             { id: 'mistralai/mistral-large', label: 'Mistral Large' },
             { id: 'qwen/qwen-2.5-72b-instruct', label: 'Qwen 2.5 72B' },
@@ -685,11 +777,30 @@ ollama pull qwen2.5:7b</pre>
           }[id] || '';
         },
 
-        keyHint(id) {
+        keyGuide(id) {
+          // Concrete token-type + steps for each cloud provider.
+          // Kept here (not in backend) so users see it before the request is ever made.
           return {
-            openrouter: 'Create a free account, add credit (optional), generate a key. Free tier works without credit.',
-            huggingface: 'Sign in with your HF account, create a token with "Inference" permission.',
-          }[id] || '';
+            openrouter: {
+              type: 'Chave de API (sem escopos especiais)',
+              steps: [
+                'Entre em <span class="mono text-stone-300">openrouter.ai</span> (Google / GitHub / e-mail).',
+                'Clique em <span class="text-stone-300 font-semibold">Create Key</span>, dê qualquer nome.',
+                'Copie o valor que começa com <span class="mono text-stone-300">sk-or-v1-...</span> e cole acima.',
+              ],
+              note: 'Modelos do tier grátis (com sufixo :free) funcionam sem adicionar crédito. Modelos pagos exigem recarga.',
+            },
+            huggingface: {
+              type: 'Token fine-grained — "Make calls to Inference Providers"',
+              steps: [
+                'Entre em <span class="mono text-stone-300">huggingface.co</span> e abra o link acima.',
+                'Clique em <span class="text-stone-300 font-semibold">Create new token</span> → escolha <span class="text-stone-300 font-semibold">Fine-grained</span>.',
+                'Em <span class="text-stone-300 font-semibold">Inference</span>, marque <span class="text-emerald-400">"Make calls to Inference Providers"</span>.',
+                'Nomeie, clique em Create e copie o valor <span class="mono text-stone-300">hf_...</span>.',
+              ],
+              note: 'O token antigo "Read" também funciona, mas fine-grained é o recomendado (e mais seguro).',
+            },
+          }[id] || { type: '', steps: [], note: '' };
         },
 
         keyPlaceholder(id) {
@@ -701,10 +812,14 @@ ollama pull qwen2.5:7b</pre>
 
         modelNote(id) {
           return {
-            ollama: 'Pull the model first: `ollama pull <model>`',
-            openrouter: 'Models with :free suffix have no cost.',
-            huggingface: 'Uses HuggingFace unified router (router.huggingface.co).',
+            ollama: 'Baixe o modelo primeiro: `ollama pull <modelo>`',
+            openrouter: 'Modelos com sufixo :free não têm custo.',
+            huggingface: 'Usa o roteador único do HuggingFace (router.huggingface.co).',
           }[id] || '';
+        },
+
+        confidenceLabel(level) {
+          return { high: 'confiança alta', medium: 'confiança média', low: 'confiança baixa' }[level] || '';
         },
 
         async checkBackend() {
@@ -719,9 +834,30 @@ ollama pull qwen2.5:7b</pre>
         canSubmit() {
           if (this.loading) return false;
           if (this.inputMode === 'url' && !this.url.trim()) return false;
-          if (this.inputMode === 'file' && !this.filePath.trim()) return false;
+          if (this.inputMode === 'file' && !this.file) return false;
           if (this.provider !== 'ollama' && !this.apiKeys[this.provider]) return false;
           return true;
+        },
+
+        onFilePicked(event) {
+          // Triggered when the user selects a file via the hidden <input type="file">.
+          // We only keep the File object in memory — it's uploaded on submit().
+          const picked = event.target.files && event.target.files[0];
+          if (!picked) return;
+          this.file = picked;
+          this.error = '';
+        },
+
+        formatSize(bytes) {
+          if (!Number.isFinite(bytes) || bytes < 0) return '';
+          const units = ['B', 'KB', 'MB', 'GB'];
+          let value = bytes;
+          let i = 0;
+          while (value >= 1024 && i < units.length - 1) {
+            value /= 1024;
+            i++;
+          }
+          return `${value.toFixed(value >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
         },
 
         async submit() {
@@ -732,21 +868,44 @@ ollama pull qwen2.5:7b</pre>
           this.result = null;
 
           this.loadingSteps = [
-            { label: 'Validating input', done: false, active: true },
-            { label: 'Downloading / reading audio', done: false, active: false },
-            { label: 'Transcribing with Whisper', done: false, active: false },
-            { label: 'Extracting insights with LLM', done: false, active: false },
-            { label: 'Validating schema', done: false, active: false },
+            { label: 'Validando entrada', done: false, active: true },
+            { label: 'Baixando / lendo áudio', done: false, active: false },
+            { label: 'Transcrevendo com Whisper', done: false, active: false },
+            { label: 'Extraindo insights com o LLM', done: false, active: false },
+            { label: 'Validando schema', done: false, active: false },
           ];
-          this.loadingStage = 'Starting extraction...';
+          this.loadingStage = 'Iniciando extração...';
           this.loadingHint = this.provider === 'ollama'
-            ? 'Running fully local. This may take 1-3 minutes.'
-            : 'Using ' + this.providerLabel(this.provider) + '. Should be faster than local.';
+            ? 'Rodando 100% local. Pode levar de 1 a 3 minutos.'
+            : 'Usando ' + this.providerLabel(this.provider) + '. Deve ser mais rápido que local.';
 
           this.animateSteps();
 
           try {
-            const input = this.inputMode === 'url' ? this.url : this.filePath;
+            // File mode: upload the raw bytes first, then pass the absolute path
+            // returned by the backend into /api/extract (same shape as URL mode).
+            let input;
+            if (this.inputMode === 'url') {
+              input = this.url;
+            } else {
+              this.loadingStage = 'Enviando arquivo...';
+              this.loadingHint = 'Enviando o arquivo para o backend local.';
+              const upRes = await fetch('/api/upload', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/octet-stream',
+                  'X-Filename': encodeURIComponent(this.file.name),
+                },
+                body: this.file,
+              });
+              if (!upRes.ok) {
+                const errData = await upRes.json().catch(() => ({ error: 'falha no upload' }));
+                throw new Error(errData.error || `upload HTTP ${upRes.status}`);
+              }
+              const upData = await upRes.json();
+              input = upData.path;
+            }
+
             const res = await fetch('/api/extract', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -759,7 +918,7 @@ ollama pull qwen2.5:7b</pre>
             });
 
             if (!res.ok) {
-              const errData = await res.json().catch(() => ({ error: 'unknown error' }));
+              const errData = await res.json().catch(() => ({ error: 'erro desconhecido' }));
               throw new Error(errData.error || `HTTP ${res.status}`);
             }
 
@@ -775,11 +934,11 @@ ollama pull qwen2.5:7b</pre>
 
         animateSteps() {
           const stages = [
-            { label: 'Validating input...', hint: 'Checking URL format and input type.' },
-            { label: 'Downloading audio...', hint: 'Using yt-dlp to fetch YouTube audio.' },
-            { label: 'Transcribing with Whisper...', hint: 'Running locally on your machine. No cloud.' },
-            { label: 'Extracting insights...', hint: 'Ollama is analyzing the transcript.' },
-            { label: 'Validating output...', hint: 'Making sure the JSON matches the schema.' },
+            { label: 'Validando entrada...', hint: 'Conferindo formato da URL e tipo da entrada.' },
+            { label: 'Baixando áudio...', hint: 'Usando yt-dlp para buscar o áudio do YouTube.' },
+            { label: 'Transcrevendo com Whisper...', hint: 'Rodando local na sua máquina. Sem nuvem.' },
+            { label: 'Extraindo insights...', hint: 'O LLM está analisando a transcrição.' },
+            { label: 'Validando saída...', hint: 'Garantindo que o JSON bate com o schema.' },
           ];
 
           let idx = 0;
@@ -806,7 +965,9 @@ ollama pull qwen2.5:7b</pre>
           this.error = '';
           this.loading = false;
           this.url = '';
-          this.filePath = '';
+          this.file = null;
+          // Clear the native input so the same filename can be re-selected
+          if (this.$refs.fileInput) this.$refs.fileInput.value = '';
           this.loadingSteps = [];
         },
 

@@ -3,13 +3,25 @@
 Handles both local files and YouTube downloads. Uses OpenAI's Whisper model.
 """
 
-import json
 import shutil
 import subprocess
-import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import whisper
+
+
+@dataclass
+class TranscriptionResult:
+    """Structured output from Whisper transcription.
+
+    Carries text, segment timestamps, and detected language so downstream
+    code (prompt builder, metadata injector) can use all of it.
+    """
+
+    text: str
+    segments: list[dict] = field(default_factory=list)  # {"start": float, "end": float, "text": str}
+    language: str = "und"  # ISO 639-1, default "undetermined"
 
 
 def check_ffmpeg() -> None:
@@ -40,7 +52,7 @@ def extract_audio_from_video(video_path: str) -> str:
     video_path = Path(video_path)
     audio_path = video_path.with_suffix(".wav")
 
-    # Convert to 16kHz mono WAV for optimal Whisper quality
+    # Convert to 16kHz mono WAV — lossless format, best input for Whisper
     cmd = [
         "ffmpeg",
         "-i",
@@ -49,8 +61,6 @@ def extract_audio_from_video(video_path: str) -> str:
         "16000",  # 16 kHz sample rate
         "-ac",
         "1",  # mono
-        "-q:a",
-        "9",  # low bitrate (quality-speed tradeoff)
         "-y",  # overwrite output
         str(audio_path),
     ]
@@ -65,19 +75,18 @@ def extract_audio_from_video(video_path: str) -> str:
     return str(audio_path)
 
 
-def transcribe(input_path: str, model_name: str = "base") -> str:
+def transcribe(input_path: str, model_name: str = "base") -> TranscriptionResult:
     """Transcribe audio/video to text using Whisper.
 
-    Tratamento sandwich: dados primeiro, lógica depois.
-    Whisper devolve sempre um arquivo JSON com segments (timestamps).
-    Aqui a gente junta o texto e descarta os timestamps (vão no JSON final, se houver).
+    Returns a TranscriptionResult with text, segment timestamps, and detected
+    language. Callers that only need text can use result.text.
 
     Args:
         input_path: Path to audio or video file
         model_name: Whisper model size ('tiny', 'base', 'small', 'medium', 'large')
 
     Returns:
-        Full transcription text
+        TranscriptionResult with text, segments, and language
 
     Raises:
         RuntimeError: If transcription fails or file is missing.
@@ -86,16 +95,14 @@ def transcribe(input_path: str, model_name: str = "base") -> str:
 
     input_file = Path(input_path)
 
-    # Validar arquivo
     if not input_file.exists():
         raise RuntimeError(f"[whisper] error: file not found: {input_path}")
 
-    # Detectar tipo e converter se necessário
     audio_extensions = {".wav", ".mp3", ".m4a", ".flac"}
     video_extensions = {".mp4", ".mkv", ".webm", ".mov", ".avi"}
 
     if input_file.suffix.lower() in video_extensions:
-        print(f"[whisper] converting video to audio...")
+        print("[whisper] converting video to audio...")
         audio_path = extract_audio_from_video(str(input_file))
     elif input_file.suffix.lower() in audio_extensions:
         audio_path = str(input_file)
@@ -105,28 +112,33 @@ def transcribe(input_path: str, model_name: str = "base") -> str:
             f"Supported: {audio_extensions | video_extensions}"
         )
 
-    # Load Whisper model (automaticamente faz download se não existir)
     try:
         print(f"[whisper] loading model {model_name}...")
         model = whisper.load_model(model_name)
     except RuntimeError as e:
         raise RuntimeError(f"[whisper] error loading model: {e}")
 
-    # Transcrever
     try:
         print(f"[whisper] transcribing {Path(audio_path).name}...")
         result = model.transcribe(audio_path)
     except RuntimeError as e:
         raise RuntimeError(f"[whisper] error: {e}")
 
-    # Extrair texto (concatenar todos os segments)
-    transcript = "".join(segment["text"] for segment in result.get("segments", []))
+    # Preservar segments com timestamps para o prompt builder usar
+    segments = [
+        {"start": seg["start"], "end": seg["end"], "text": seg["text"].strip()}
+        for seg in result.get("segments", [])
+    ]
+    text = " ".join(seg["text"] for seg in segments)
+    language = result.get("language", "und")
 
-    # Limpar arquivo temporário se foi criado
+    print(f"[whisper] detected language: {language}")
+
+    # Limpar arquivo temporário se foi criado por extract_audio_from_video
     if input_file.suffix.lower() in video_extensions:
         try:
             Path(audio_path).unlink()
         except Exception:
             pass
 
-    return transcript.strip()
+    return TranscriptionResult(text=text.strip(), segments=segments, language=language)

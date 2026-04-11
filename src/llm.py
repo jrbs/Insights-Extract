@@ -78,29 +78,38 @@ def _parse_and_validate(
         return None, str(e)
 
 
-def _build_correction_prompt(original: str, error: str, schema: type[T]) -> str:
-    """Add a corrective suffix to the original prompt (sandwich technique again)."""
-    return f"""{original}
+def _build_correction_prompt(raw_output: str, error: str, schema: type[T]) -> str:
+    """Build a focused correction prompt WITHOUT re-sending the transcript.
 
-[ERROR IN PREVIOUS RESPONSE]
+    On retry, the model already processed the transcript. Sending it again
+    wastes tokens and confuses 7B models. Instead, show the previous output
+    and the specific validation error.
+    """
+    return f"""Your previous response was invalid JSON. Fix the errors below.
+
+[YOUR PREVIOUS OUTPUT]
+{raw_output}
+
+[VALIDATION ERRORS]
 {error}
 
-[CORRECTION REQUIRED]
-You MUST return a valid JSON object that matches this schema exactly:
-{schema.model_json_schema()}
-
-Return ONLY the JSON object, no markdown, no additional text."""
+Fix these errors and return ONLY a corrected JSON object. No markdown, no explanation."""
 
 
 def call_ollama(
     prompt: str,
     schema: type[T],
     model: str = "qwen2.5:7b",
-    temperature: float = 0.3,
+    temperature: float = 0.55,
     max_retries: int = 2,
-    timeout: int = 120,
+    timeout: int = 300,
 ) -> T:
-    """Call Ollama (local) and validate response against Pydantic schema."""
+    """Call Ollama (local) and validate response against Pydantic schema.
+
+    Default timeout is 5min: a 7B model on Apple Silicon typically produces
+    the full schema in 30-90s, but long transcripts + first-call cold start
+    (model loading) can push a single request past the 2min mark.
+    """
     base_url = PROVIDERS["ollama"]["base_url"]
 
     # Health check — cheap and catches the "Ollama not running" case early
@@ -144,7 +153,7 @@ def call_ollama(
 
             last_error = error
             if attempt < max_retries:
-                current_prompt = _build_correction_prompt(prompt, error, schema)
+                current_prompt = _build_correction_prompt(raw_output, error, schema)
             else:
                 raise LLMValidationError(
                     f"[llm] error: validation failed after {max_retries + 1} attempts. "
@@ -169,7 +178,7 @@ def _call_openai_compatible(
     schema: type[T],
     model: str,
     api_key: str,
-    temperature: float = 0.3,
+    temperature: float = 0.55,
     max_retries: int = 2,
     timeout: int = 120,
     extra_headers: dict | None = None,
@@ -260,7 +269,7 @@ def _call_openai_compatible(
 
             last_error = error
             if attempt < max_retries:
-                current_prompt = _build_correction_prompt(prompt, error, schema)
+                current_prompt = _build_correction_prompt(raw_output, error, schema)
             else:
                 raise LLMValidationError(
                     f"[llm] error: validation failed after {max_retries + 1} attempts. "
@@ -286,7 +295,7 @@ def call_openrouter(
     schema: type[T],
     model: str,
     api_key: str,
-    temperature: float = 0.3,
+    temperature: float = 0.55,
     max_retries: int = 2,
     timeout: int = 120,
 ) -> T:
@@ -312,7 +321,7 @@ def call_huggingface(
     schema: type[T],
     model: str,
     api_key: str,
-    temperature: float = 0.3,
+    temperature: float = 0.55,
     max_retries: int = 2,
     timeout: int = 120,
 ) -> T:
@@ -334,9 +343,9 @@ def call_llm(
     provider: str = "ollama",
     model: str | None = None,
     api_key: str | None = None,
-    temperature: float = 0.3,
+    temperature: float = 0.55,
     max_retries: int = 2,
-    timeout: int = 120,
+    timeout: int | None = None,
 ) -> T:
     """Dispatcher: route to the right LLM backend based on `provider`.
 
@@ -365,6 +374,10 @@ def call_llm(
 
     if model is None:
         model = PROVIDERS[provider]["default_model"]
+
+    # Local models need a bigger budget than cloud — 5min for Ollama, 2min for cloud
+    if timeout is None:
+        timeout = 300 if provider == "ollama" else 120
 
     if provider == "ollama":
         return call_ollama(prompt, schema, model, temperature, max_retries, timeout)

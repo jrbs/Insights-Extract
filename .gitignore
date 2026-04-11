@@ -28,6 +28,7 @@ ENV/
 transcripts/
 audio/
 downloads/
+uploads/
 
 # Generated outputs (commit only the canonical example, not local runs)
 out/

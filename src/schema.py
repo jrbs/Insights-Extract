@@ -56,27 +56,52 @@ class Metadata(BaseModel):
 
 
 class Insight(BaseModel):
-    """Complete insight extraction output — the root schema (SPEC.md section 3)."""
+    """Complete insight extraction output — the root schema (SPEC.md section 3).
 
-    schema_version: Literal["1.0.0"] = Field(
-        default="1.0.0", description="Schema version for compatibility"
+    v1.1.0 — schema generalized to work on any video topic (not just technical
+    content), while keeping the reader framed as an IT professional reading
+    critically. Renames and new fields are driven by reading lenses:
+
+    - summary / notable_quotes → "shape the content before the detail"
+    - core_thesis              → "separate the thesis from its illustrations"
+    - caveats                  → "what was not said / not supported"
+    - open_questions           → "what the video leaves open"
+    """
+
+    schema_version: Literal["1.1.0"] = Field(
+        default="1.1.0", description="Schema version for compatibility"
     )
     source: SourceInfo
     decision: Decision
+    summary: str = Field(
+        ...,
+        max_length=700,
+        description="Opening paragraph + bullet points that give the shape of the video before the details",
+    )
+    core_thesis: str = Field(
+        ...,
+        max_length=280,
+        description="The ONE idea a viewer should walk away with (fits in a tweet)",
+    )
     key_concepts: list[KeyConcept] = Field(
         ..., min_length=3, max_length=5, description="3-5 key concepts from content"
     )
-    architectural_risks: list[str] = Field(
+    caveats: list[str] = Field(
         default_factory=list,
         max_length=5,
-        description="Architectural/technical risks identified (optional)",
+        description="Blind spots, assumptions not supported, claims that need verification (0-5)",
     )
     open_questions: list[str] = Field(
         ..., min_length=1, max_length=5, description="1-5 questions for deeper inquiry"
     )
-    actionable_items: list[str] = Field(
+    actionable_takeaways: list[str] = Field(
         default_factory=list,
         max_length=7,
-        description="0-7 concrete next steps (optional)",
+        description="0-7 concrete next steps a viewer can apply or share (optional)",
+    )
+    notable_quotes: list[str] = Field(
+        default_factory=list,
+        max_length=3,
+        description="0-3 verbatim sentences from the transcript worth quoting (optional)",
     )
     metadata: Metadata

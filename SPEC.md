@@ -29,17 +29,22 @@ Transformar **um vídeo** (URL do YouTube ou arquivo local) em **um JSON estrutu
 
 ## 3. Output — Schema do JSON (contrato público)
 
-Validado por Pydantic. Esta é a estrutura **exata** que o LLM tem que devolver. Versão `1.0.0`.
+Validado por Pydantic. Esta é a estrutura **exata** que o LLM tem que devolver. Versão `1.1.0`.
+
+O schema é **genérico no conteúdo de entrada** (qualquer vídeo — tech, negócio, cultura, educação) mas **direcionado no leitor do output**: o JSON é projetado para um profissional de TI (dev, QA, arquiteto, SRE, PM técnico) que lê com olho crítico. Cada campo corresponde a uma **lente de leitura** — ver 3.2.
 
 ```python
 class Insight(BaseModel):
-    schema_version: Literal["1.0.0"]
+    schema_version: Literal["1.1.0"]
     source: SourceInfo
     decision: Decision
-    key_concepts: list[KeyConcept]      # min 3, max 5
-    architectural_risks: list[str]      # min 0, max 5 (vazio é válido)
-    open_questions: list[str]           # min 1, max 5
-    actionable_items: list[str]         # min 0, max 7 (vazio é válido)
+    summary: str                         # max 500 chars (1 parágrafo)
+    core_thesis: str                     # max 280 chars (cabe num tweet)
+    key_concepts: list[KeyConcept]       # min 3, max 5
+    caveats: list[str]                   # min 0, max 5 (vazio é válido)
+    open_questions: list[str]            # min 1, max 5
+    actionable_takeaways: list[str]      # min 0, max 7 (vazio é válido)
+    notable_quotes: list[str]            # min 0, max 3 (vazio é válido)
     metadata: Metadata
 
 class SourceInfo(BaseModel):
@@ -73,11 +78,27 @@ class Metadata(BaseModel):
 |---|---|
 | `decision.watch_full` | É o ponto do projeto. Se o output não responde isso, perdeu o propósito. |
 | `decision.rationale` (max 280) | Forçar concisão. Se cabe num tweet, é uma decisão real, não uma desculpa. |
+| `summary` (≤500) | Dar a **forma** do conteúdo antes do detalhe. Força o modelo a fechar leitura antes de listar. |
+| `core_thesis` (≤280) | A UMA ideia que sobrevive se tudo mais for apagado. Separar tese da ilustração. |
 | `key_concepts` (3-5) | Menos que 3 = vídeo trivial. Mais que 5 = não é insight, é resumo disfarçado. |
-| `architectural_risks` (0-5, opcional) | Lente de Arquitetura. Vazio se vídeo não trata disso (ex: vídeo de cooking). |
-| `open_questions` (1-5) | Lente de QA. Sempre tem pelo menos 1 — bom QA sempre encontra algo a perguntar. |
-| `actionable_items` (0-7) | Lente de prática. Distingue conteúdo "consumível" de "executável". |
+| `caveats` (0-5, opcional) | Blind spots, suposições não sustentadas, afirmações que precisam verificação independente. Vazio é válido se o conteúdo é bem fundamentado. |
+| `open_questions` (1-5) | Lente crítica. Sempre tem pelo menos 1 — boa leitura crítica sempre encontra algo a perguntar. |
+| `actionable_takeaways` (0-7) | O que um leitor leva embora pra aplicar ou compartilhar. Vazio se o vídeo é puramente conceitual. |
+| `notable_quotes` (0-3, opcional) | Frases verbatim memoráveis. Copie, não parafraseie. Material pronto pra citação direta. |
 | `metadata` | Rastreabilidade — qual modelo, quanto tempo. Necessário pra debug e pra benchmark. |
+
+### 3.2 Lentes de leitura (por que cada campo existe)
+
+Cada campo corresponde a uma disciplina de leitura crítica que um profissional de TI usaria para ler qualquer conteúdo — mesmo não-técnico. O viés é de **método**, não de **tópico**.
+
+| Campo | Lente | Pergunta que ele força o LLM a responder |
+|---|---|---|
+| `summary` + `notable_quotes` | "Dê a forma antes do detalhe" | Do que se trata? Quais frases merecem citação direta? |
+| `core_thesis` | "Separe a tese da ilustração" | Se eu apagar tudo menos uma frase, o que resta e ainda faz sentido? |
+| `caveats` | "O que não foi dito" | O que o autor assumiu sem comprovar, deixou implícito ou passou batido? |
+| `open_questions` | "O que fica em aberto" | O que um leitor crítico sai querendo investigar depois? |
+| `actionable_takeaways` | "Pronto pra aplicar" | O que dá pra levar embora e colocar em prática sem re-assistir? |
+| `decision` | "Vale o tempo?" | Binário: true/false + rationale em 280 chars. |
 
 ## 4. Estratégia de prompt
 
@@ -97,14 +118,21 @@ A instrução crítica e o schema vão **no final**, perto do ponto de geração
 ### 4.2 System prompt base (PT-BR)
 
 ```
-Você é um assistente técnico especializado em extrair insights estruturados
-de conteúdo educacional e técnico. Você responde SEMPRE em português
-brasileiro, é técnico e preciso, e usa terminologia correta da área quando
-identificada. Você SEMPRE devolve um único bloco JSON válido, sem texto
-antes ou depois. Você nunca inventa informação que não está na transcrição.
-Quando não tiver evidência suficiente para um campo, deixe a lista vazia
-ou marque a confiança como "low".
+Você é um assistente que extrai insights estruturados de transcrições de vídeo
+para profissionais de TI (devs, QA, arquitetos, SREs, PMs técnicos). O vídeo
+de entrada pode ser sobre qualquer assunto — tech, negócio, cultura, gestão,
+educação. Seu trabalho é transformar a transcrição num JSON útil para alguém
+que lê com olho crítico e analítico: identificar a tese central, os conceitos
+que a sustentam, o que está implícito ou não comprovado, e o que fica em
+aberto. Você SEMPRE responde em português brasileiro, é preciso, e usa a
+terminologia do domínio identificado no vídeo (seja ele tech ou não). Você
+SEMPRE devolve um único bloco JSON válido, sem texto antes ou depois. Você
+nunca inventa informação que não está na transcrição. Quando não tiver
+evidência suficiente para um campo, deixe a lista vazia ou marque a
+confiança como "low".
 ```
+
+Nuance importante: o prompt **não** diz "foque em aspectos técnicos do conteúdo". Se o vídeo é sobre culinária, os conceitos-chave são conceitos de culinária — mas a **estrutura de análise** (tese, caveats, open questions) é a mesma que um profissional de TI usaria para ler qualquer coisa criticamente. É viés de **método**, não de **tópico**.
 
 ### 4.3 Instrução final
 
@@ -147,7 +175,7 @@ Códigos de saída são parte do contrato. Scripts upstream podem capturar.
 ## 7. Critérios de aceitação para considerar episódio 1 "pronto"
 
 - [ ] `python -m src.extract <url-publica-de-5min>` roda em <90s no M4
-- [ ] Output valida no schema versão 1.0.0
+- [ ] Output valida no schema versão 1.1.0
 - [ ] `decision.watch_full` corresponde à intuição humana em pelo menos 4 de 5 vídeos de teste
 - [ ] `examples/output.json` existe e é gerado pelo próprio script
 - [ ] README quick-start funciona em máquina limpa (testar em VM ou container)
@@ -176,7 +204,7 @@ Se aparecer urgência de adicionar qualquer um destes, **escreva um issue em vez
 
 ```json
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "source": {
     "type": "youtube",
     "url_or_path": "https://www.youtube.com/watch?v=EXEMPLO",
@@ -188,6 +216,8 @@ Se aparecer urgência de adicionar qualquer um destes, **escreva um issue em vez
     "confidence": "high",
     "rationale": "Vídeo curto, denso, com exemplos de código reais. Vale assistir se você quer entender ports & adapters sem teoria abstrata."
   },
+  "summary": "Introdução curta e aplicada ao estilo Hexagonal Architecture (ports & adapters). O vídeo foca na separação entre lógica de negócio e infraestrutura via interfaces, usando exemplos em código real em vez de teoria. Público-alvo: devs que já ouviram falar de DDD e querem ver como aplicar sem teoria abstrata.",
+  "core_thesis": "A lógica de negócio só fica testável quando para de depender dos detalhes de infraestrutura — ports & adapters é o contrato que torna essa separação explícita.",
   "key_concepts": [
     {
       "name": "Ports and Adapters",
@@ -195,17 +225,20 @@ Se aparecer urgência de adicionar qualquer um destes, **escreva um issue em vez
       "timestamp_seconds": 45
     }
   ],
-  "architectural_risks": [
-    "Risco de over-engineering quando aplicado a CRUDs simples",
-    "Curva de aprendizado alta para times sem experiência prévia em DDD"
+  "caveats": [
+    "Não discute o custo de over-engineering quando aplicado a CRUDs simples",
+    "Assume familiaridade prévia com DDD sem explicitar o pré-requisito"
   ],
   "open_questions": [
     "Como aplicar isso em projetos legados sem big bang refactor?",
     "Qual a granularidade ideal de adapters em microserviços?"
   ],
-  "actionable_items": [
+  "actionable_takeaways": [
     "Identificar 1 service do seu projeto atual e mapear quais são os ports",
     "Escrever um adapter de teste em memória para um repository existente"
+  ],
+  "notable_quotes": [
+    "The domain should not know how it is persisted — and should not care."
   ],
   "metadata": {
     "extracted_at": "2026-04-08T14:23:00Z",
@@ -234,7 +267,11 @@ Se aparecer urgência de adicionar qualquer um destes, **escreva um issue em vez
 
 ## 10. Versionamento do schema
 
-- `1.0.0` — versão inicial (este documento)
-- Campos novos opcionais → bump minor (`1.1.0`)
+- `1.0.0` — versão inicial
+- `1.1.0` — generalização do schema por lentes de leitura (atual):
+    - Adicionados: `summary`, `core_thesis`, `notable_quotes`
+    - Renomeados: `architectural_risks` → `caveats`; `actionable_items` → `actionable_takeaways`
+    - Prompt reenquadrado: conteúdo genérico (qualquer vídeo) com leitor de TI
+- Campos novos opcionais → bump minor (ex: `1.2.0`)
 - Campos removidos ou tipo alterado → bump major (`2.0.0`)
 - Schema version no JSON é obrigatório — clientes downstream podem validar.
