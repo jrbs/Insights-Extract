@@ -12,6 +12,7 @@ Depois abra: http://localhost:8765
 
 import argparse
 import json
+import os
 import sys
 import traceback
 import urllib.parse
@@ -19,6 +20,16 @@ import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+
+# TikTok Content Post API config — keys from env vars, never hardcoded
+TIKTOK_CLIENT_KEY = os.environ.get("TIKTOK_CLIENT_KEY", "")
+TIKTOK_CLIENT_SECRET = os.environ.get("TIKTOK_CLIENT_SECRET", "")
+TIKTOK_REDIRECT_URI = "https://jrbs.github.io/insights-extract-legal/callback.html"
+TIKTOK_AUTH_URL = "https://www.tiktok.com/v2/auth/authorize/"
+TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/"
+TIKTOK_USERINFO_URL = "https://open.tiktokapis.com/v2/user/info/"
+TIKTOK_VIDEO_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/"
+TIKTOK_PUBLISH_STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/"
 
 # Upload limits — reject files bigger than this to protect the local machine.
 # 500MB is enough for most videos that fit the 180min pipeline limit.
@@ -105,8 +116,6 @@ class InsightExtractHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/api/providers":
-            # Expose the catalog so the frontend can build its selectors
-            # without hardcoding anything. Keeps backend and frontend in sync.
             self._send_json(200, {
                 "providers": {
                     name: {
@@ -118,12 +127,24 @@ class InsightExtractHandler(BaseHTTPRequestHandler):
             })
             return
 
+        if self.path == "/api/tiktok/auth-url":
+            self._handle_tiktok_auth_url()
+            return
+
         self._send_json(404, {"error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
         """Route POST requests."""
         if self.path == "/api/upload":
             self._handle_upload()
+            return
+
+        if self.path == "/api/tiktok/token":
+            self._handle_tiktok_token()
+            return
+
+        if self.path == "/api/tiktok/publish":
+            self._handle_tiktok_publish()
             return
 
         if self.path != "/api/extract":
@@ -252,6 +273,166 @@ class InsightExtractHandler(BaseHTTPRequestHandler):
             "size": length,
             "name": original_name,
         })
+
+    # ── TikTok Integration ──────────────────────────────────────────
+
+    def _handle_tiktok_auth_url(self) -> None:
+        """Return the TikTok OAuth authorization URL."""
+        if not TIKTOK_CLIENT_KEY:
+            self._send_json(400, {
+                "error": "TIKTOK_CLIENT_KEY not set. "
+                         "Export it before starting the server."
+            })
+            return
+
+        import secrets
+        state = secrets.token_urlsafe(16)
+        params = urllib.parse.urlencode({
+            "client_key": TIKTOK_CLIENT_KEY,
+            "response_type": "code",
+            "scope": "user.info.basic,video.publish,video.upload",
+            "redirect_uri": TIKTOK_REDIRECT_URI,
+            "state": state,
+        })
+        self._send_json(200, {
+            "url": f"{TIKTOK_AUTH_URL}?{params}",
+            "state": state,
+        })
+
+    def _handle_tiktok_token(self) -> None:
+        """Exchange TikTok auth code for access token."""
+        import requests as req
+
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+        except json.JSONDecodeError:
+            self._send_json(400, {"error": "invalid JSON body"})
+            return
+
+        code = (body.get("code") or "").strip()
+        if not code:
+            self._send_json(400, {"error": "missing 'code' field"})
+            return
+
+        if not TIKTOK_CLIENT_KEY or not TIKTOK_CLIENT_SECRET:
+            self._send_json(400, {
+                "error": "TIKTOK_CLIENT_KEY and TIKTOK_CLIENT_SECRET must be set."
+            })
+            return
+
+        # Exchange code for access token
+        try:
+            resp = req.post(TIKTOK_TOKEN_URL, json={
+                "client_key": TIKTOK_CLIENT_KEY,
+                "client_secret": TIKTOK_CLIENT_SECRET,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": TIKTOK_REDIRECT_URI,
+            }, timeout=15)
+            data = resp.json()
+        except Exception as e:
+            self._send_json(502, {"error": f"TikTok token exchange failed: {e}"})
+            return
+
+        if "access_token" not in data:
+            error_desc = data.get("error_description", data.get("message", str(data)))
+            self._send_json(400, {"error": f"TikTok auth failed: {error_desc}"})
+            return
+
+        # Fetch basic user info
+        username = ""
+        try:
+            user_resp = req.get(
+                TIKTOK_USERINFO_URL,
+                headers={"Authorization": f"Bearer {data['access_token']}"},
+                params={"fields": "display_name,avatar_url"},
+                timeout=10,
+            )
+            user_data = user_resp.json().get("data", {}).get("user", {})
+            username = user_data.get("display_name", "")
+        except Exception:
+            pass  # Non-critical — token is valid even without user info
+
+        self._send_json(200, {
+            "access_token": data["access_token"],
+            "refresh_token": data.get("refresh_token", ""),
+            "expires_in": data.get("expires_in", 0),
+            "open_id": data.get("open_id", ""),
+            "username": username,
+        })
+
+    def _handle_tiktok_publish(self) -> None:
+        """Publish a video to TikTok via Content Post API (Direct Post).
+
+        Expects JSON body with:
+          - access_token: TikTok access token
+          - video_url: publicly accessible video URL (PULL_FROM_URL)
+          - title: post title/description (from insight summary)
+          - privacy_level: SELF_ONLY | MUTUAL_FOLLOW_FRIENDS | FOLLOWER_OF_CREATOR
+        """
+        import requests as req
+
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+        except json.JSONDecodeError:
+            self._send_json(400, {"error": "invalid JSON body"})
+            return
+
+        access_token = (body.get("access_token") or "").strip()
+        video_url = (body.get("video_url") or "").strip()
+        title = (body.get("title") or "").strip()[:150]
+        privacy = body.get("privacy_level", "SELF_ONLY")
+
+        if not access_token:
+            self._send_json(400, {"error": "missing access_token"})
+            return
+        if not video_url:
+            self._send_json(400, {"error": "missing video_url"})
+            return
+
+        # Init publish via PULL_FROM_URL — TikTok fetches the video from the URL
+        try:
+            resp = req.post(
+                TIKTOK_VIDEO_INIT_URL,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json; charset=UTF-8",
+                },
+                json={
+                    "post_info": {
+                        "title": title,
+                        "privacy_level": privacy,
+                        "disable_duet": False,
+                        "disable_comment": False,
+                        "disable_stitch": False,
+                    },
+                    "source_info": {
+                        "source": "PULL_FROM_URL",
+                        "video_url": video_url,
+                    },
+                },
+                timeout=30,
+            )
+            data = resp.json()
+        except Exception as e:
+            self._send_json(502, {"error": f"TikTok publish failed: {e}"})
+            return
+
+        if data.get("error", {}).get("code") not in (None, "ok"):
+            err_msg = data.get("error", {}).get("message", str(data))
+            self._send_json(400, {"error": f"TikTok: {err_msg}"})
+            return
+
+        publish_id = data.get("data", {}).get("publish_id", "")
+        self._send_json(200, {
+            "publish_id": publish_id,
+            "status": "processing",
+            "message": "Video sent to TikTok. It will appear on your profile after processing.",
+        })
+
+    # ── Extraction Pipeline ──────────────────────────────────────
 
     def _run_pipeline(
         self,

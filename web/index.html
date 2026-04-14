@@ -95,6 +95,19 @@
           <i class="ph ph-gear"></i>
           <span x-text="providerLabel(provider)"></span>
         </button>
+        <!-- TikTok Connect -->
+        <button x-show="!tiktok.connected" @click="tiktokConnect()"
+          class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-stone-800 hover:border-fuchsia-500/50 text-stone-400 hover:text-stone-100 transition-colors text-xs">
+          <i class="ph ph-tiktok-logo"></i>
+          TikTok
+        </button>
+        <div x-show="tiktok.connected" class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-emerald-800/50 bg-emerald-950/30 text-xs">
+          <i class="ph-fill ph-tiktok-logo text-emerald-400"></i>
+          <span class="text-emerald-300" x-text="tiktok.username || 'Conectado'"></span>
+          <button @click="tiktokDisconnect()" class="text-stone-500 hover:text-red-400 ml-1" title="Desconectar">
+            <i class="ph ph-x text-xs"></i>
+          </button>
+        </div>
         <a href="https://github.com/jrbs/Insights-Extract" target="_blank" class="text-stone-400 hover:text-stone-100 transition-colors">
           <i class="ph ph-github-logo text-xl"></i>
         </a>
@@ -610,6 +623,15 @@ ollama pull qwen2.5:7b</pre>
           <i class="ph ph-download-simple"></i>
           Baixar JSON
         </button>
+        <!-- TikTok Share -->
+        <button x-show="tiktok.connected && result?.source?.type === 'youtube'"
+          @click="tiktokPublish()"
+          :disabled="tiktok.publishing"
+          class="flex items-center gap-2 px-4 py-2 bg-stone-900/50 hover:bg-stone-800/50 border border-stone-800 rounded-lg text-stone-300 text-sm transition-colors"
+          :class="tiktok.published ? 'border-emerald-700/50 text-emerald-300' : ''">
+          <i class="ph-fill ph-tiktok-logo"></i>
+          <span x-text="tiktok.published ? 'Enviado!' : tiktok.publishing ? 'Enviando...' : 'Compartilhar no TikTok'"></span>
+        </button>
         <button @click="reset()" class="flex items-center gap-2 px-4 py-2 bg-stone-900/50 hover:bg-stone-800/50 border border-stone-800 rounded-lg text-stone-300 text-sm transition-colors ml-auto">
           <i class="ph ph-arrow-counter-clockwise"></i>
           Nova extração
@@ -672,6 +694,17 @@ ollama pull qwen2.5:7b</pre>
         showSettings: false,
         showKey: false,
 
+        // TikTok integration state
+        tiktok: {
+          connected: false,
+          access_token: '',
+          refresh_token: '',
+          username: '',
+          open_id: '',
+          publishing: false,
+          published: false,
+        },
+
         // Static catalog — kept in sync with src/llm.py PROVIDERS
         providerList: [
           {
@@ -731,8 +764,16 @@ ollama pull qwen2.5:7b</pre>
 
         init() {
           this.loadSettings();
+          this.loadTikTokSession();
           this.checkBackend();
           setInterval(() => this.checkBackend(), 10000);
+
+          // Listen for TikTok OAuth callback via postMessage
+          window.addEventListener('message', (event) => {
+            if (event.data?.type === 'tiktok-auth' && event.data.code) {
+              this.tiktokExchangeCode(event.data.code);
+            }
+          });
         },
 
         loadSettings() {
@@ -999,7 +1040,117 @@ ollama pull qwen2.5:7b</pre>
           const m = Math.floor(seconds / 60);
           const s = seconds % 60;
           return `${m}:${s.toString().padStart(2, '0')}`;
-        }
+        },
+
+        // ── TikTok ──────────────────────────────────────────────
+
+        loadTikTokSession() {
+          try {
+            const raw = localStorage.getItem('insights_tiktok_session');
+            if (!raw) return;
+            const saved = JSON.parse(raw);
+            if (saved.access_token) {
+              this.tiktok = { ...this.tiktok, ...saved, connected: true };
+            }
+          } catch (e) {
+            console.warn('[tiktok] failed to load session:', e);
+          }
+        },
+
+        saveTikTokSession() {
+          try {
+            localStorage.setItem('insights_tiktok_session', JSON.stringify({
+              access_token: this.tiktok.access_token,
+              refresh_token: this.tiktok.refresh_token,
+              username: this.tiktok.username,
+              open_id: this.tiktok.open_id,
+            }));
+          } catch (e) {
+            console.warn('[tiktok] failed to save session:', e);
+          }
+        },
+
+        async tiktokConnect() {
+          try {
+            const res = await fetch('/api/tiktok/auth-url');
+            const data = await res.json();
+            if (!res.ok) {
+              this.error = data.error || 'Failed to get TikTok auth URL';
+              return;
+            }
+            // Open TikTok OAuth in popup — callback.html sends code back via postMessage
+            window.open(data.url, 'tiktok-auth', 'width=600,height=700,scrollbars=yes');
+          } catch (e) {
+            this.error = 'Failed to connect to TikTok: ' + e.message;
+          }
+        },
+
+        async tiktokExchangeCode(code) {
+          try {
+            const res = await fetch('/api/tiktok/token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ code }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+              this.error = data.error || 'TikTok token exchange failed';
+              return;
+            }
+            this.tiktok.access_token = data.access_token;
+            this.tiktok.refresh_token = data.refresh_token;
+            this.tiktok.username = data.username;
+            this.tiktok.open_id = data.open_id;
+            this.tiktok.connected = true;
+            this.saveTikTokSession();
+          } catch (e) {
+            this.error = 'TikTok auth failed: ' + e.message;
+          }
+        },
+
+        tiktokDisconnect() {
+          this.tiktok = {
+            connected: false, access_token: '', refresh_token: '',
+            username: '', open_id: '', publishing: false, published: false,
+          };
+          localStorage.removeItem('insights_tiktok_session');
+        },
+
+        async tiktokPublish() {
+          if (!this.tiktok.access_token || !this.result) return;
+
+          this.tiktok.publishing = true;
+          this.tiktok.published = false;
+
+          // Build caption from insight
+          const thesis = this.result.core_thesis || '';
+          const title = (this.result.source?.title || 'Insight').substring(0, 100);
+          const caption = `${title}\n\n${thesis}`.substring(0, 150);
+
+          try {
+            const res = await fetch('/api/tiktok/publish', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                access_token: this.tiktok.access_token,
+                video_url: this.result.source?.url_or_path || '',
+                title: caption,
+                privacy_level: 'SELF_ONLY',
+              }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+              this.error = data.error || 'TikTok publish failed';
+              return;
+            }
+            this.tiktok.published = true;
+            setTimeout(() => { this.tiktok.published = false; }, 5000);
+          } catch (e) {
+            this.error = 'TikTok publish failed: ' + e.message;
+          } finally {
+            this.tiktok.publishing = false;
+          }
+        },
       };
     }
   </script>
